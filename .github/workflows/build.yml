@@ -33,6 +33,15 @@ jobs:
           -p:PlatformTarget=x86 -p:AssemblyName=LegacyMenuBridge32
           --self-contained -v minimal -o publish/x86
 
+      - name: Self-test (headless)
+        shell: pwsh
+        run: |
+          & publish/x64/LegacyMenuBridge.exe --selftest
+          $code = $LASTEXITCODE
+          $log = Join-Path $env:LOCALAPPDATA 'LegacyMenuBridge\selftest.log'
+          if (Test-Path $log) { Get-Content $log }
+          exit $code
+
       - name: Collect artifacts
         shell: pwsh
         run: |

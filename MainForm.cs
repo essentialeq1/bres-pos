@@ -97,6 +97,7 @@ public sealed class MainForm : Form
             int com = entries.Count(e => e.Kind == EntryKind.Com);
             int cmd = entries.Count - com;
             _status.Text = $"Found {entries.Count} legacy entries ({cmd} commands, {com} COM). Tick what you want, then Import.";
+            Log.Write($"scan: found {entries.Count} entries ({cmd} commands, {com} COM)");
         }
         catch (Exception ex)
         {
@@ -201,6 +202,7 @@ public sealed class MainForm : Form
                 msg += $"\r\n{result.Errors.Count} issue(s):\r\n" + string.Join("\r\n", result.Errors.Take(8));
             msg += "\r\n\r\nFinally, open Custom Context Menu and toggle its cache off and on to apply the changes.";
             _status.Text = $"Imported {result.Written}, skipped {result.Skipped}.";
+            Log.Write($"import: wrote {result.Written}, skipped {result.Skipped}, errors {result.Errors.Count}");
             MessageBox.Show(this, msg, "Import complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)

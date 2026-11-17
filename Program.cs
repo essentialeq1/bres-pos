@@ -9,7 +9,6 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // Hidden modes used by the JSON entries we generate for IKAS-MC.
         if (args.Length >= 1)
         {
             switch (args[0])
@@ -17,6 +16,7 @@ internal static class Program
                 case "--inspect": return RunInspect(args);
                 case "--invoke": return RunInvoke(args);
                 case "--verb": return RunVerb(args);
+                case "--selftest": return Diagnostics.RunSelfTest();
             }
         }
 
@@ -34,6 +34,7 @@ internal static class Program
         try
         {
             var items = HandlerHost.Inspect(args[1]);
+            Log.Write($"inspect path={args[1]} items={items.Count}");
             try
             {
                 Console.OutputEncoding = Encoding.UTF8;
@@ -42,22 +43,44 @@ internal static class Program
             catch { }
             return 0;
         }
-        catch { return 1; }
+        catch (Exception ex)
+        {
+            Log.Write("inspect failed: " + ex.Message);
+            return 1;
+        }
     }
 
     // --invoke "<verb-or-title>" "<path>"
     private static int RunInvoke(string[] args)
     {
         if (args.Length < 3) return 2;
-        try { return HandlerHost.Invoke(args[2], args[1]) ? 0 : 1; }
-        catch { return 1; }
+        try
+        {
+            bool ok = HandlerHost.Invoke(args[2], args[1]);
+            Log.Write($"invoke selector={args[1]} path={args[2]} => {(ok ? "ok" : "failed")}");
+            return ok ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Log.Write("invoke failed: " + ex.Message);
+            return 1;
+        }
     }
 
     // --verb "<verb>" "<path>"
     private static int RunVerb(string[] args)
     {
         if (args.Length < 3) return 2;
-        try { return HandlerHost.InvokeShellVerb(args[2], args[1]) ? 0 : 1; }
-        catch { return 1; }
+        try
+        {
+            bool ok = HandlerHost.InvokeShellVerb(args[2], args[1]);
+            Log.Write($"verb={args[1]} path={args[2]} => {(ok ? "ok" : "failed")}");
+            return ok ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Log.Write("verb failed: " + ex.Message);
+            return 1;
+        }
     }
 }
