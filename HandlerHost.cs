@@ -15,14 +15,12 @@ public sealed class MenuItemInfo
 
 /// <summary>
 /// Loads the classic (merged) shell context menu for a file/folder and either
-/// lists its items or invokes one. This is the piece that lets IKAS-MC run
-/// COM-backed legacy entries (Kaspersky, 7-Zip, ...) that cannot be reproduced
-/// as a plain command line.
+/// lists its items or invokes one. The menu is fetched the canonical way: parse
+/// the path into a PIDL, bind to the parent folder, then GetUIObjectOf(IContextMenu).
 /// </summary>
 public static class HandlerHost
 {
-    private static readonly Guid BHID_SFUIObject = new("3981E224-F559-11D3-8E3A-00C04F6837D5");
-    private static readonly Guid IID_IShellItem = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+    private static readonly Guid IID_IShellFolder = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid IID_IContextMenu = new("000214E4-0000-0000-C000-000000000046");
 
     private const uint CMF_NORMAL = 0x00000000;
@@ -32,18 +30,10 @@ public static class HandlerHost
     private const uint CMIC_MASK_ASYNCOK = 0x00100000;
     private const int SW_SHOWNORMAL = 1;
 
-    /// <summary>
-    /// Runs the inspection in a child process so a badly behaved handler DLL can
-    /// only crash the child. Falls back to an in-process inspection if spawning
-    /// the child fails.
-    /// </summary>
-    public static List<MenuItemInfo> InspectIsolated(string path)
-        => InspectIsolated(path, Bitness.Unknown);
+    /// <summary>Runs inspection in a child process so a bad handler DLL can only crash the child.</summary>
+    public static List<MenuItemInfo> InspectIsolated(string path) => InspectIsolated(path, Bitness.Unknown);
 
-    /// <summary>
-    /// Same as the one-argument overload but runs the inspection in the helper
-    /// whose bitness matches the handler (the 32-bit helper for x86 handlers).
-    /// </summary>
+    /// <summary>Same as above but chooses the helper matching the handler bitness.</summary>
     public static List<MenuItemInfo> InspectIsolated(string path, Bitness bitness)
     {
         try
@@ -83,15 +73,19 @@ public static class HandlerHost
         IContextMenu? cm = null;
         try
         {
-            if (!TryCreateContextMenu(path, out itemPtr, out cmPtr)) { Log.Write("$inspect {Path.GetFileName(path)}: create failed"); return items; }
+            if (!TryCreateContextMenu(path, out itemPtr, out cmPtr))
+            {
+                Log.Write($"inspect {Path.GetFileName(path)}: create failed");
+                return items;
+            }
             cm = (IContextMenu)Marshal.GetObjectForIUnknown(cmPtr);
             hMenu = Native.CreatePopupMenu();
             int qhr = cm.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL);
-            Log.Write("$inspect {Path.GetFileName(path)}: QueryContextMenu hr=0x{qhr:X8}");
+            Log.Write($"inspect {Path.GetFileName(path)}: QueryContextMenu hr=0x{qhr:X8}");
             if (qhr < 0) return items;
 
             int count = Native.GetMenuItemCount(hMenu);
-            Log.Write("$inspect {Path.GetFileName(path)}: menu count={count}");
+            Log.Write($"inspect {Path.GetFileName(path)}: menu count={count}");
             for (int i = 0; i < count; i++)
             {
                 uint id = Native.GetMenuItemID(hMenu, i);
@@ -102,7 +96,10 @@ public static class HandlerHost
                 items.Add(new MenuItemInfo { Id = (int)id, Title = title, Verb = verb });
             }
         }
-        catch { /* a bad handler must not crash the app */ }
+        catch (Exception ex)
+        {
+            Log.Write($"inspect {Path.GetFileName(path)}: threw {ex.GetType().Name}: {ex.Message}");
+        }
         finally
         {
             if (hMenu != IntPtr.Zero) Native.DestroyMenu(hMenu);
@@ -112,10 +109,7 @@ public static class HandlerHost
         return items;
     }
 
-    /// <summary>
-    /// Rebuilds the classic menu for <paramref name="path"/> and fires the item
-    /// whose verb (preferred) or title equals <paramref name="selector"/>.
-    /// </summary>
+    /// <summary>Rebuilds the classic menu for <paramref name="path"/> and fires the matching item.</summary>
     public static bool Invoke(string path, string selector)
     {
         IntPtr itemPtr = IntPtr.Zero, cmPtr = IntPtr.Zero, hMenu = IntPtr.Zero;
@@ -139,9 +133,7 @@ public static class HandlerHost
                 if (string.Equals(v, selector, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(title, selector, StringComparison.OrdinalIgnoreCase))
                 {
-                    targetId = (int)id;
-                    verb = v;
-                    break;
+                    targetId = (int)id; verb = v; break;
                 }
             }
             if (targetId < 0) return false;
@@ -163,10 +155,7 @@ public static class HandlerHost
         {
             var psi = new ProcessStartInfo
             {
-                FileName = path,
-                Verb = verb,
-                UseShellExecute = true,
-                WindowStyle = ProcessWindowStyle.Normal
+                FileName = path, Verb = verb, UseShellExecute = true, WindowStyle = ProcessWindowStyle.Normal
             };
             Process.Start(psi);
             return true;
@@ -180,31 +169,36 @@ public static class HandlerHost
     {
         itemPtr = IntPtr.Zero;
         cmPtr = IntPtr.Zero;
+        IntPtr pidl = IntPtr.Zero, parentPtr = IntPtr.Zero, childPidl = IntPtr.Zero;
+        IShellFolder? parent = null;
         try
         {
-            Guid riid = IID_IShellItem;
-            int hr = Native.SHCreateItemFromParsingName(path, IntPtr.Zero, ref riid, out itemPtr);
-            Log.Write("$inspect {Path.GetFileName(path)}: SHCreateItemFromParsingName hr=0x{hr:X8} ptr={itemPtr != IntPtr.Zero}");
-            if (hr != 0 || itemPtr == IntPtr.Zero) return false;
+            int hr = Native.SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out _);
+            Log.Write($"inspect {Path.GetFileName(path)}: SHParseDisplayName hr=0x{hr:X8} pidl={(pidl != IntPtr.Zero)}");
+            if (hr != 0 || pidl == IntPtr.Zero) return false;
 
-            var shellItem = (IShellItem)Marshal.GetObjectForIUnknown(itemPtr);
-            try
-            {
-                Guid bhid = BHID_SFUIObject;
-                Guid cmIid = IID_IContextMenu;
-                hr = shellItem.BindToHandler(IntPtr.Zero, ref bhid, ref cmIid, out cmPtr);
-                Log.Write("$inspect {Path.GetFileName(path)}: BindToHandler hr=0x{hr:X8} ptr={cmPtr != IntPtr.Zero}");
-            }
-            finally
-            {
-                Marshal.ReleaseComObject(shellItem);
-            }
+            Guid iidFolder = IID_IShellFolder;
+            hr = Native.SHBindToParent(pidl, ref iidFolder, out parentPtr, out childPidl);
+            Log.Write($"inspect {Path.GetFileName(path)}: SHBindToParent hr=0x{hr:X8} child={(childPidl != IntPtr.Zero)}");
+            if (hr != 0 || parentPtr == IntPtr.Zero || childPidl == IntPtr.Zero) return false;
+
+            parent = (IShellFolder)Marshal.GetObjectForIUnknown(parentPtr);
+            Guid iidCm = IID_IContextMenu;
+            var apidl = new[] { childPidl };
+            hr = parent.GetUIObjectOf(IntPtr.Zero, 1, apidl, ref iidCm, IntPtr.Zero, out cmPtr);
+            Log.Write($"inspect {Path.GetFileName(path)}: GetUIObjectOf hr=0x{hr:X8} cm={(cmPtr != IntPtr.Zero)}");
             return hr == 0 && cmPtr != IntPtr.Zero;
         }
-        catch
+        catch (Exception ex)
         {
-            if (itemPtr != IntPtr.Zero) { try { Marshal.Release(itemPtr); } catch { } itemPtr = IntPtr.Zero; }
+            Log.Write($"inspect {Path.GetFileName(path)}: create threw {ex.GetType().Name}: {ex.Message}");
             return false;
+        }
+        finally
+        {
+            if (parent != null) { try { Marshal.ReleaseComObject(parent); } catch { } }
+            if (parentPtr != IntPtr.Zero) { try { Marshal.Release(parentPtr); } catch { } }
+            if (pidl != IntPtr.Zero) { Native.ILFree(pidl); }
         }
     }
 
@@ -240,8 +234,6 @@ public static class HandlerHost
 
     private static string? GetVerb(IContextMenu cm, uint id)
     {
-        // Use an explicit native buffer so the ANSI and Unicode verbs are each
-        // read with the correct encoding.
         IntPtr buf = Marshal.AllocHGlobal(1040);
         try
         {
@@ -276,10 +268,19 @@ public static class HandlerHost
 
     // -------------------- COM interop --------------------
 
-    [ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellItem
+    [ComImport, Guid("000214E6-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellFolder
     {
-        [PreserveSig] int BindToHandler(IntPtr pbc, ref Guid pbhid, ref Guid riid, out IntPtr ppv);
+        void ParseDisplayName();
+        void EnumObjects();
+        void BindToObject();
+        void BindToStorage();
+        void CompareIDs();
+        void CreateViewObject();
+        void GetAttributesOf();
+        [PreserveSig] int GetUIObjectOf(IntPtr hwndOwner, uint cidl,
+            [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] IntPtr[] apidl,
+            ref Guid riid, IntPtr rgfReserved, out IntPtr ppv);
     }
 
     [ComImport, Guid("000214E4-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -314,8 +315,14 @@ public static class HandlerHost
     private static class Native
     {
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        public static extern int SHCreateItemFromParsingName(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszPath, IntPtr pbc, ref Guid riid, out IntPtr ppv);
+        public static extern int SHParseDisplayName(
+            [MarshalAs(UnmanagedType.LPWStr)] string pszName, IntPtr pbc, out IntPtr ppidl, uint sfgaoIn, out uint psfgaoOut);
+
+        [DllImport("shell32.dll")]
+        public static extern int SHBindToParent(IntPtr pidl, ref Guid riid, out IntPtr ppv, out IntPtr ppidlLast);
+
+        [DllImport("shell32.dll")]
+        public static extern void ILFree(IntPtr pidl);
 
         [DllImport("user32.dll")]
         public static extern IntPtr CreatePopupMenu();
@@ -332,7 +339,6 @@ public static class HandlerHost
         [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
         private static extern int GetMenuStringNative(IntPtr hMenu, uint uIDItem, StringBuilder lpString, int nMaxCount, uint uFlag);
 
-        // Reads a menu item's text by position (MF_BYPOSITION = 0x400).
         public static string GetMenuString(IntPtr hMenu, int position)
         {
             var sb = new StringBuilder(512);
