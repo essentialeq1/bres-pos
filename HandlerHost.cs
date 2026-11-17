@@ -83,12 +83,15 @@ public static class HandlerHost
         IContextMenu? cm = null;
         try
         {
-            if (!TryCreateContextMenu(path, out itemPtr, out cmPtr)) return items;
+            if (!TryCreateContextMenu(path, out itemPtr, out cmPtr)) { Log.Write("$inspect {Path.GetFileName(path)}: create failed"); return items; }
             cm = (IContextMenu)Marshal.GetObjectForIUnknown(cmPtr);
             hMenu = Native.CreatePopupMenu();
-            if (cm.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL) < 0) return items;
+            int qhr = cm.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL);
+            Log.Write("$inspect {Path.GetFileName(path)}: QueryContextMenu hr=0x{qhr:X8}");
+            if (qhr < 0) return items;
 
             int count = Native.GetMenuItemCount(hMenu);
+            Log.Write("$inspect {Path.GetFileName(path)}: menu count={count}");
             for (int i = 0; i < count; i++)
             {
                 uint id = Native.GetMenuItemID(hMenu, i);
@@ -181,6 +184,7 @@ public static class HandlerHost
         {
             Guid riid = IID_IShellItem;
             int hr = Native.SHCreateItemFromParsingName(path, IntPtr.Zero, ref riid, out itemPtr);
+            Log.Write("$inspect {Path.GetFileName(path)}: SHCreateItemFromParsingName hr=0x{hr:X8} ptr={itemPtr != IntPtr.Zero}");
             if (hr != 0 || itemPtr == IntPtr.Zero) return false;
 
             var shellItem = (IShellItem)Marshal.GetObjectForIUnknown(itemPtr);
@@ -189,6 +193,7 @@ public static class HandlerHost
                 Guid bhid = BHID_SFUIObject;
                 Guid cmIid = IID_IContextMenu;
                 hr = shellItem.BindToHandler(IntPtr.Zero, ref bhid, ref cmIid, out cmPtr);
+                Log.Write("$inspect {Path.GetFileName(path)}: BindToHandler hr=0x{hr:X8} ptr={cmPtr != IntPtr.Zero}");
             }
             finally
             {

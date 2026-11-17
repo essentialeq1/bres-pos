@@ -36,11 +36,10 @@ jobs:
       - name: Self-test (headless)
         shell: pwsh
         run: |
-          & publish/x64/LegacyMenuBridge.exe --selftest
-          $code = $LASTEXITCODE
+          $p = Start-Process -FilePath 'publish/x64/LegacyMenuBridge.exe' -ArgumentList '--selftest' -Wait -PassThru
           $log = Join-Path $env:LOCALAPPDATA 'LegacyMenuBridge\selftest.log'
           if (Test-Path $log) { Get-Content $log }
-          exit $code
+          exit $p.ExitCode
 
       - name: Collect artifacts
         shell: pwsh
