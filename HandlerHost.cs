@@ -29,6 +29,7 @@ public static class HandlerHost
     private const uint CMIC_MASK_UNICODE = 0x00004000;
     private const uint CMIC_MASK_ASYNCOK = 0x00100000;
     private const int SW_SHOWNORMAL = 1;
+    private const uint IdCmdFirst = 1;
 
     /// <summary>Runs inspection in a child process so a bad handler DLL can only crash the child.</summary>
     public static List<MenuItemInfo> InspectIsolated(string path) => InspectIsolated(path, Bitness.Unknown);
@@ -80,7 +81,7 @@ public static class HandlerHost
             }
             cm = (IContextMenu)Marshal.GetObjectForIUnknown(cmPtr);
             hMenu = Native.CreatePopupMenu();
-            int qhr = cm.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL);
+            int qhr = cm.QueryContextMenu(hMenu, 0, IdCmdFirst, 0x7FFF, CMF_NORMAL);
             Log.Write($"inspect {Path.GetFileName(path)}: QueryContextMenu hr=0x{qhr:X8}");
             if (qhr < 0) return items;
 
@@ -119,7 +120,7 @@ public static class HandlerHost
             if (!TryCreateContextMenu(path, out itemPtr, out cmPtr)) return false;
             cm = (IContextMenu)Marshal.GetObjectForIUnknown(cmPtr);
             hMenu = Native.CreatePopupMenu();
-            if (cm.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL) < 0) return false;
+            if (cm.QueryContextMenu(hMenu, 0, IdCmdFirst, 0x7FFF, CMF_NORMAL) < 0) return false;
 
             int count = Native.GetMenuItemCount(hMenu);
             int targetId = -1;
@@ -221,7 +222,7 @@ public static class HandlerHost
             }
             else
             {
-                info.lpVerb = new IntPtr(id); // MAKEINTRESOURCE(id)
+                info.lpVerb = new IntPtr(id - (int)IdCmdFirst); // MAKEINTRESOURCE(offset)
             }
             int hr = cm.InvokeCommand(ref info);
             return hr >= 0;
@@ -238,13 +239,13 @@ public static class HandlerHost
         try
         {
             Zero(buf, 1040);
-            if (cm.GetCommandString(new UIntPtr(id), GCS_VERBW, IntPtr.Zero, buf, 520) == 0)
+            if (cm.GetCommandString(new UIntPtr(id - IdCmdFirst), GCS_VERBW, IntPtr.Zero, buf, 520) == 0)
             {
                 string? s = Marshal.PtrToStringUni(buf);
                 if (!string.IsNullOrEmpty(s)) return s;
             }
             Zero(buf, 1040);
-            if (cm.GetCommandString(new UIntPtr(id), GCS_VERBA, IntPtr.Zero, buf, 520) == 0)
+            if (cm.GetCommandString(new UIntPtr(id - IdCmdFirst), GCS_VERBA, IntPtr.Zero, buf, 520) == 0)
             {
                 string? s = Marshal.PtrToStringAnsi(buf);
                 if (!string.IsNullOrEmpty(s)) return s;
