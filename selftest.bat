@@ -1,6 +1,6 @@
 @echo off
 setlocal
-rem Runs the headless diagnostics and shows the report (and the app log).
+rem Runs the headless diagnostics and shows the report plus the recent app log.
 "%~dp0LegacyMenuBridge.exe" --selftest
 echo.
 if exist "%LOCALAPPDATA%\LegacyMenuBridge\selftest.log" (

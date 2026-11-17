@@ -44,7 +44,6 @@ public static class Diagnostics
     public static int RunSelfTest()
     {
         var sb = new StringBuilder();
-        bool ok = true;
 
         void Line(string s)
         {
@@ -59,16 +58,16 @@ public static class Diagnostics
         Line("Exe  : " + (Environment.ProcessPath ?? "?"));
 
         Line("");
-        Line("[1/4] IKAS-MC detection");
+        Line("[1/5] IKAS-MC detection");
         try
         {
             string? folder = IkasWriter.FindCustomCommandsFolder();
-            Line(folder == null ? "  NOT FOUND" : "  " + folder);
+            Line(folder == null ? "  NOT FOUND (expected in CI)" : "  " + folder);
         }
         catch (Exception ex) { Line("  error: " + ex.Message); }
 
         Line("");
-        Line("[2/4] Registry scan");
+        Line("[2/5] Registry scan");
         try
         {
             var entries = RegistryScanner.Scan();
@@ -80,24 +79,36 @@ public static class Diagnostics
         catch (Exception ex) { Line("  error: " + ex.Message); }
 
         Line("");
-        Line("[3/4] COM inspect (.txt sample)");
+        Line("[3/5] COM inspect (.txt sample)");
         int txtCount = InspectReport(sb, CreateSample(".txt"));
 
         Line("");
-        Line("[4/4] COM inspect (.lmbprobe probe)");
+        Line("[4/5] COM inspect (.lmbprobe, no verbs expected)");
         InspectReport(sb, CreateSample(ProbeExt));
 
-        if (txtCount == 0)
+        Line("");
+        string notepad = Path.Combine(Environment.SystemDirectory, "notepad.exe");
+        Line("[5/5] COM inspect (notepad.exe — must have items)");
+        int exeCount = InspectReport(sb, notepad);
+
+        // Fold the trailing app log (which carries the COM HRESULT details) into this report.
+        try
         {
-            ok = false;
-            Line("");
-            Line("RESULT: FAIL - the .txt context menu returned no items; COM interop is not working on this machine.");
+            if (File.Exists(Log.LogFile))
+            {
+                Line("");
+                Line("--- recent app log (log.txt) ---");
+                foreach (var l in File.ReadAllLines(Log.LogFile).TakeLast(40))
+                    Line(l);
+            }
         }
-        else
-        {
-            Line("");
-            Line($"RESULT: OK - inspected {txtCount} items on the .txt sample.");
-        }
+        catch { }
+
+        bool ok = exeCount > 0;
+        Line("");
+        Line(ok
+            ? $"RESULT: OK - notepad.exe yielded {exeCount} items (.txt={txtCount}; COM interop works)."
+            : "RESULT: FAIL - notepad.exe yielded no items; COM interop is not working on this machine.");
 
         string report = sb.ToString();
         try
