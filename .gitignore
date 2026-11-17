@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+# IDE
+.vs/
+*.user
+*.suo
+*.DotSettings.user
+
+# Publish output
+publish/
+
+# OS junk
+.DS_Store
+Thumbs.db

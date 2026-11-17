@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish 64-bit LegacyMenuBridge.exe
+        run: >
+          dotnet publish LegacyMenuBridge.csproj -c Release -r win-x64
+          --self-contained -v minimal -o publish/x64
+
+      - name: Publish 32-bit LegacyMenuBridge32.exe
+        run: >
+          dotnet publish LegacyMenuBridge.csproj -c Release -r win-x86
+          -p:PlatformTarget=x86 -p:AssemblyName=LegacyMenuBridge32
+          --self-contained -v minimal -o publish/x86
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item publish/x64/LegacyMenuBridge.exe dist/
+          Copy-Item publish/x86/LegacyMenuBridge32.exe dist/
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LegacyMenuBridge-windows
+          path: dist/*
+
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
