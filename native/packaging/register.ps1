@@ -2,28 +2,47 @@
   Registers the sparse package so "Classic Menu" appears in the Windows 11
   modern context menu.
 
-  Requires a prior build (build.ps1) and either Developer Mode enabled or a
-  trusted self-signed certificate (create-cert.ps1).
+  Works both:
+    * from the unzipped release folder (dll/exe/manifest/assets beside this script), and
+    * from native\packaging after a local build (binaries in ..\build\x64\Release).
+
+  Requires Developer Mode enabled (Settings > Privacy & Security > For developers).
 #>
 param(
-    [string]$InstallDir = (Join-Path $PSScriptRoot "..\build\x64\Release"),
+    [string]$InstallDir = "",
     [string]$Manifest   = (Join-Path $PSScriptRoot "AppxManifest.xml")
 )
 
 $ErrorActionPreference = "Stop"
-$InstallDir = (Resolve-Path $InstallDir).Path
 
-if (-not (Test-Path (Join-Path $InstallDir "LegacyMenuBridge.dll"))) {
-    throw "LegacyMenuBridge.dll not found in $InstallDir. Run build.ps1 first."
+if (-not $InstallDir) {
+    if (Test-Path (Join-Path $PSScriptRoot "LegacyMenuBridge.dll")) {
+        $InstallDir = $PSScriptRoot
+    } else {
+        $InstallDir = Join-Path $PSScriptRoot "..\build\x64\Release"
+    }
 }
 
-# Everything the manifest references (dll/exe/assets) must sit next to it.
-Copy-Item $Manifest (Join-Path $InstallDir "AppxManifest.xml") -Force
-Copy-Item (Join-Path $PSScriptRoot "Assets") (Join-Path $InstallDir "Assets") -Recurse -Force
+$InstallDir = (Resolve-Path $InstallDir).Path
+if (-not (Test-Path (Join-Path $InstallDir "LegacyMenuBridge.dll"))) {
+    throw "LegacyMenuBridge.dll not found in $InstallDir."
+}
 
-Write-Host "Registering sparse package..." -ForegroundColor Cyan
-Add-AppxPackage -Register (Join-Path $InstallDir "AppxManifest.xml") -ExternalLocation $InstallDir
+$destManifest = Join-Path $InstallDir "AppxManifest.xml"
+if ([IO.Path]::GetFullPath($Manifest) -ne [IO.Path]::GetFullPath($destManifest)) {
+    Copy-Item $Manifest $destManifest -Force
+}
+
+$assetsSrc = Join-Path $PSScriptRoot "Assets"
+$assetsDst = Join-Path $InstallDir "Assets"
+if (Test-Path $assetsSrc) {
+    if ([IO.Path]::GetFullPath($assetsSrc) -ne [IO.Path]::GetFullPath($assetsDst)) {
+        Copy-Item $assetsSrc $assetsDst -Recurse -Force
+    }
+}
+
+Write-Host "Registering sparse package from $InstallDir ..." -ForegroundColor Cyan
+Add-AppxPackage -Register $destManifest -ExternalLocation $InstallDir
 
 Write-Host "Registered." -ForegroundColor Green
-Write-Host "If the entry does not appear, restart Explorer (or sign out and in)."
-Write-Host "Right-click a file or folder -> 'Classic Menu'."
+Write-Host "If 'Classic Menu' does not appear, restart Explorer (Task Manager > Windows Explorer > Restart)."

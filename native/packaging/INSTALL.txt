@@ -1,0 +1,22 @@
+LegacyMenuBridge - Windows 11 modern context menu bridge
+========================================================
+
+1) Unzip this folder somewhere permanent (for example C:\Tools\LegacyMenuBridge).
+
+2) Turn on Developer Mode:
+     Settings > Privacy & Security > For developers > Developer Mode = On
+   (This is required to sideload the sparse package.)
+
+3) Register it (same user). From this folder:
+     powershell -ExecutionPolicy Bypass -File .\register.ps1
+
+4) Right-click a file or folder in Explorer and choose "Classic Menu".
+   If it does not appear, restart Explorer:
+     Task Manager > Windows Explorer > Restart
+
+Logs: %LOCALAPPDATA%\LegacyMenuBridgeNative\log.txt
+
+To remove:
+     powershell -ExecutionPolicy Bypass -File .\unregister.ps1
+
+The DLL/EXE are unsigned, so SmartScreen may warn. That is expected for now.

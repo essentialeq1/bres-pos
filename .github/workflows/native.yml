@@ -58,6 +58,8 @@ jobs:
           Copy-Item "native/packaging/Assets" $dist -Recurse
           Copy-Item "native/packaging/register.ps1" $dist
           Copy-Item "native/packaging/unregister.ps1" $dist
+          Copy-Item "native/packaging/create-cert.ps1" $dist
+          Copy-Item "native/packaging/INSTALL.txt" $dist
           Compress-Archive -Path "$dist/*" -DestinationPath "dist/LegacyMenuBridge-native-x64.zip" -Force
 
       - name: Upload artifacts
