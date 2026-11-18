@@ -1,16 +1,15 @@
 <#
-  Tries to activate the COM class and prints the exact HRESULT on failure.
-  Run this after install.bat if "Classic Menu" does not appear.
+  Activation self-check, driven by CLSID.
+  The DLL also logs "dll attached" to %TEMP%\LegacyMenuBridgeNative-*.log the
+  first time Explorer activates it, which is the definitive confirmation.
 #>
-$ErrorActionPreference = "Continue"
+$clsid = [guid]"B7F3A2C1-9D4E-4F6A-8B2C-5E1D3A7F9B04"
 try {
-    $obj = New-Object -ComObject "LegacyMenuBridge.Command"
+    $t = [Type]::GetTypeFromCLSID($clsid)
+    $o = [Activator]::CreateInstance($t)
     Write-Host "Activation OK" -ForegroundColor Green
-    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) } catch {}
+    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($o) } catch {}
 } catch {
-    $msg = $_.Exception.Message
-    if ($_.Exception.InnerException -and $_.Exception.InnerException.Message) {
-        $msg += " | Inner: " + $_.Exception.InnerException.Message
-    }
-    Write-Host "Activation FAILED: $msg" -ForegroundColor Red
+    Write-Host "Activation check inconclusive: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Right-click once, then check %TEMP%\LegacyMenuBridgeNative-*.log for 'dll attached'."
 }

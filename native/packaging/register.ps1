@@ -24,7 +24,7 @@ if ([IO.Path]::GetFullPath($Manifest) -ne [IO.Path]::GetFullPath($destManifest))
 }
 $assetsSrc = Join-Path $PSScriptRoot "Assets"
 $assetsDst = Join-Path $InstallDir "Assets"
-if (Test-Path $assetsSrc -and ([IO.Path]::GetFullPath($assetsSrc) -ne [IO.Path]::GetFullPath($assetsDst))) {
+if ((Test-Path $assetsSrc) -and ([IO.Path]::GetFullPath($assetsSrc) -ne [IO.Path]::GetFullPath($assetsDst))) {
     Copy-Item $assetsSrc $assetsDst -Recurse -Force
 }
 

@@ -259,20 +259,28 @@ STDMETHODIMP CLegacyCommand::GetIcon(IShellItemArray* psiItemArray, LPWSTR* ppsz
         return DuplicateString(icon, ppszIcon);
     }
     if (!_icon.empty()) return DuplicateString(_icon, ppszIcon);
+    // Items without their own icon reuse the module icon. The XAML menu does
+    // not accept S_FALSE from GetIcon and crashes Explorer on it.
+    if (g_hInst) {
+        wchar_t path2[MAX_PATH] = { 0 };
+        if (GetModuleFileNameW(g_hInst, path2, MAX_PATH)) {
+            std::wstring icon2 = std::wstring(L"\"") + path2 + L"\",0";
+            return DuplicateString(icon2, ppszIcon);
+        }
+    }
     return S_FALSE;
 }
 
 STDMETHODIMP CLegacyCommand::GetToolTip(IShellItemArray*, LPWSTR* ppszInfotip) {
     Log(L"GetToolTip(%s)", KindStr(_kind));
     if (ppszInfotip) *ppszInfotip = nullptr;
-    return S_FALSE;
+    return E_NOTIMPL;
 }
 
 STDMETHODIMP CLegacyCommand::GetCanonicalName(GUID* pguidCommandName) {
     Log(L"GetCanonicalName(%s)", KindStr(_kind));
     if (!pguidCommandName) return E_POINTER;
-    *pguidCommandName = GUID_RootCommand;
-    if (_kind == Kind::Item) pguidCommandName->Data1 = GUID_RootCommand.Data1 + _offset + 1;
+    *pguidCommandName = GUID_NULL;
     return S_OK;
 }
 
