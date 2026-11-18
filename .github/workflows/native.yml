@@ -17,15 +17,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure (x64)
-        run: cmake -S native -B native/build/x64 -G "Visual Studio 17 2022" -A x64
+      - name: Setup MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-      - name: Build (Release)
-        run: cmake --build native/build/x64 --config Release
+      - name: Toolchain versions
+        shell: pwsh
+        run: |
+          cmake --version
+          (Get-Command ninja -ErrorAction SilentlyContinue).Source
+          cl 2>&1 | Select-Object -First 1
+
+      - name: Configure (Ninja, Release)
+        run: cmake -S native -B native/build/x64 -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build native/build/x64
 
       - name: Show outputs
         shell: pwsh
-        run: Get-ChildItem native/build/x64/Release | Format-Table Name, Length
+        run: Get-ChildItem native/build/x64 | Format-Table Name, Length
 
       - name: Validate manifest XML
         shell: pwsh
@@ -37,7 +49,7 @@ jobs:
       - name: Stage distributable
         shell: pwsh
         run: |
-          $out  = "native/build/x64/Release"
+          $out  = "native/build/x64"
           $dist = "dist/native"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item "$out/LegacyMenuBridge.dll" $dist
