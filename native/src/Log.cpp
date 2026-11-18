@@ -17,13 +17,12 @@ void EnsureInit() {
     if (g_initDone) return;
     g_initDone = true;
 
-    wchar_t local[MAX_PATH] = { 0 };
-    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return;
-
-    std::wstring dir = std::wstring(local) + L"\\LegacyMenuBridgeNative";
-    CreateDirectoryW(dir.c_str(), nullptr);
-    g_logFile = dir + L"\\log.txt";
+    // %TEMP% is reliable across every process (Explorer, the dllhost surrogate,
+    // and the worker), unlike LOCALAPPDATA which can be virtualized for the
+    // packaged COM surrogate.
+    wchar_t temp[MAX_PATH] = { 0 };
+    if (GetTempPathW(MAX_PATH, temp) == 0) return;
+    g_logFile = std::wstring(temp) + L"LegacyMenuBridgeNative.log";
 }
 } // namespace
 

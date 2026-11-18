@@ -6,7 +6,7 @@ namespace legacy {
 void SetLogComponent(const wchar_t* name);
 
 // Thread-safe printf-style logger. Writes to OutputDebugString and to
-// %LOCALAPPDATA%\LegacyMenuBridgeNative\log.txt.
+// %TEMP%\LegacyMenuBridgeNative.log.
 void Log(const wchar_t* fmt, ...);
 
 } // namespace legacy

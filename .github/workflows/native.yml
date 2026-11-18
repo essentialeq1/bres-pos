@@ -47,6 +47,7 @@ jobs:
       - name: Stage distributable
         shell: pwsh
         run: |
+          $tag  = $env:GITHUB_REF_NAME
           $out  = "native/build/x64"
           $dist = "dist/native"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
@@ -58,20 +59,22 @@ jobs:
           Copy-Item "native/packaging/unregister.ps1" $dist
           Copy-Item "native/packaging/install.bat" $dist
           Copy-Item "native/packaging/uninstall.bat" $dist
+          Copy-Item "native/packaging/diagnose.ps1" $dist
           Copy-Item "native/packaging/create-cert.ps1" $dist
           Copy-Item "native/packaging/sign.ps1" $dist
           Copy-Item "native/packaging/make-msix.ps1" $dist
           Copy-Item "native/packaging/INSTALL.txt" $dist
-          Compress-Archive -Path "$dist/*" -DestinationPath "dist/LegacyMenuBridge-native-x64.zip" -Force
+          Compress-Archive -Path "$dist/*" -DestinationPath "dist/LegacyMenuBridge-native-x64-$tag.zip" -Force
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: LegacyMenuBridge-native
-          path: dist/LegacyMenuBridge-native-x64.zip
+          path: dist/*.zip
 
       - name: Attach to release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/LegacyMenuBridge-native-x64.zip
+          name: LegacyMenuBridge ${{ github.ref_name }}
+          files: dist/LegacyMenuBridge-native-x64-${{ github.ref_name }}.zip

@@ -5,6 +5,9 @@ cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0register.ps1"
 if %errorlevel% equ 0 (
     echo.
+    echo Registered. Running activation check...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0diagnose.ps1"
+    echo.
     echo Done. Right-click a file or folder and choose "Classic Menu".
     echo If it does not appear, restart Explorer.
     echo.
@@ -21,5 +24,10 @@ if %errorlevel% neq 0 (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0register.ps1"
+if %errorlevel% equ 0 (
+    echo.
+    echo Registered. Running activation check...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0diagnose.ps1"
+)
 echo.
 pause
