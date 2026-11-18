@@ -43,7 +43,7 @@ built instantly.
 | `src/Common.h` | Common Win32/SDK includes |
 | `src/Guid.h` | CLSID of the command provider |
 | `src/MenuModel.h` | `FlatLegacyItem` descriptor |
-| `src/Log.h/.cpp` | File + debug logger (`%TEMP%\LegacyMenuBridgeNative.log`) |
+| `src/Log.h/.cpp` | File + debug logger (`%TEMP%\LegacyMenuBridgeNative-*.log`) |
 | `src/LegacyEnumerator.h/.cpp` | Build/snapshot/re-invoke the classic menu (the core) |
 | `src/ExplorerCommand.h/.cpp` | `IExplorerCommand` + `IEnumExplorerCommand` + `IObjectWithSelection` + `IShellExtInit` |
 | `src/EnumExplorerCommand.cpp` | Sub-command enumerator |

@@ -3,6 +3,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cwchar>
 #include <string>
 
 namespace legacy {
@@ -22,7 +23,12 @@ void EnsureInit() {
     // packaged COM surrogate.
     wchar_t temp[MAX_PATH] = { 0 };
     if (GetTempPathW(MAX_PATH, temp) == 0) return;
-    g_logFile = std::wstring(temp) + L"LegacyMenuBridgeNative.log";
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t name[MAX_PATH];
+    swprintf_s(name, L"%sLegacyMenuBridgeNative-%04u%02u%02u-%02u%02u%02u.log",
+               temp, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    g_logFile = name;
 }
 } // namespace
 

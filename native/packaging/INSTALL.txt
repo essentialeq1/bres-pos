@@ -14,7 +14,7 @@ LegacyMenuBridge - Windows 11 modern context menu bridge
    If it does not appear, restart Explorer:
      Task Manager > Windows Explorer > Restart
 
-Logs: %TEMP%\LegacyMenuBridgeNative.log
+Logs: %TEMP%\LegacyMenuBridgeNative-*.log
 
 To remove:
      powershell -ExecutionPolicy Bypass -File .\unregister.ps1

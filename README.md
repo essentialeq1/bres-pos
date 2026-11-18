@@ -26,7 +26,7 @@ crashing third-party handler can never take Explorer down.
 3. Picking an item spawns the worker again to rebuild the menu and call
    `IContextMenu::InvokeCommand` for the chosen item.
 
-Logs: `%TEMP%\LegacyMenuBridgeNative.log`
+Logs: `%TEMP%\LegacyMenuBridgeNative-*.log`
 
 ## Archived prototype
 
