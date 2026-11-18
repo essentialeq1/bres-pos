@@ -37,6 +37,12 @@ jobs:
         run: |
           & native/build/x64/LegacyMenuBridge.exe --selftest
 
+      - name: COM method smoke test
+        shell: pwsh
+        run: |
+          & native/build/x64/LegacyMenuBridge.exe --comtest
+          exit $LASTEXITCODE
+
       - name: Validate manifest XML
         shell: pwsh
         run: |
