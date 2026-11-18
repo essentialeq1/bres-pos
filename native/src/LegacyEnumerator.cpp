@@ -195,7 +195,7 @@ HRESULT InvokeLegacyItem(IShellItemArray* selection, UINT offset,
 
     CMINVOKECOMMANDINFOEX info = { 0 };
     info.cbSize = sizeof(info);
-    info.fMask = CMIC_MASK_ASYNCOK;
+    info.fMask = 0;
     info.lpVerb = MAKEINTRESOURCEA(chosen);
     info.lpVerbW = nullptr;
     info.nShow = SW_SHOWNORMAL;
