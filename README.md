@@ -1,3 +1,8 @@
+> **Status:** The active implementation is now the native C++ shell extension in
+> [`native/`](native/README.md). It registers an `IExplorerCommand` in the Windows 11
+> modern context menu and pulls in the entire classic menu at click time. The C#
+> prototype described below is kept for reference only.
+
 # LegacyMenuBridge
 
 Bridge the **classic** Windows context-menu entries (the ones hidden behind

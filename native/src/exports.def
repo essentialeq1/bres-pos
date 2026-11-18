@@ -1,0 +1,4 @@
+LIBRARY LegacyMenuBridge
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE
