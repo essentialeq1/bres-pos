@@ -12,7 +12,7 @@ into JSON; this version is a real shell extension.
 ## How it works
 
 > **Note (v0.1.8+):** the heavy/enumeration work now runs in a **separate worker
-> process** (`LegacyMenuBridge.exe`). The in-process DLL (`LegacyMenuBridge.dll`) is a
+> process** (`LegacyMenuBridge.exe`). The shell-extension DLL (`LegacyMenuBridge.dll`, hosted in a COM surrogate) is a
 > thin shim that only spawns that worker, so a crashing legacy handler can never take
 > Explorer down.
 

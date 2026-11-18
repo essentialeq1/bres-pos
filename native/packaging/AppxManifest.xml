@@ -52,11 +52,11 @@
         <!-- COM server that implements IExplorerCommand. -->
         <com:Extension Category="windows.comServer">
           <com:ComServer>
-            <com:InProcessServer>
+            <com:SurrogateServer DisplayName="LegacyMenuBridge context menu">
               <com:Class Id="B7F3A2C1-9D4E-4F6A-8B2C-5E1D3A7F9B04"
                          Path="LegacyMenuBridge.dll"
-                         ThreadingModel="Apartment" />
-            </com:InProcessServer>
+                         ThreadingModel="STA" />
+            </com:SurrogateServer>
           </com:ComServer>
         </com:Extension>
 
