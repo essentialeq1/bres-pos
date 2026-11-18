@@ -141,7 +141,7 @@ int wmain(int argc, wchar_t** argv) {
             FreeLibrary(mod);
         }
     } else {
-        PrintLine(L"LegacyMenuBridge worker (internal).";
+        PrintLine(L"LegacyMenuBridge worker (internal).");
         PrintLine(L"--selftest | --enumerate <path>... | --invoke <offset> <title> <path>...");
     }
 
