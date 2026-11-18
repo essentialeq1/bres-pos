@@ -10,10 +10,8 @@ namespace legacy {
 namespace {
 
 constexpr UINT kIdFirst = 1;
-constexpr UINT kIdLast = 0x7FFF;
+constexpr UINT kIdLast  = 0x7FFF;
 
-// Owns everything needed while a legacy menu exists. The HMENU and the COM
-// objects are released as soon as the snapshot/invoke finishes.
 struct MergedMenu {
     Microsoft::WRL::ComPtr<IContextMenu> ctx;
     HMENU hMenu = nullptr;
@@ -22,30 +20,8 @@ struct MergedMenu {
     ~MergedMenu() {
         if (hMenu) { DestroyMenu(hMenu); hMenu = nullptr; }
         for (auto p : ownedPidls) { if (p) ILFree(p); }
-        ownedPidls.clear();
     }
 };
-
-HRESULT GetSelectionPaths(IShellItemArray* selection, std::vector<std::wstring>& paths) {
-    if (!selection) return E_INVALIDARG;
-    DWORD count = 0;
-    HRESULT hr = selection->GetCount(&count);
-    if (FAILED(hr)) return hr;
-
-    for (DWORD i = 0; i < count; ++i) {
-        Microsoft::WRL::ComPtr<IShellItem> item;
-        hr = selection->GetItemAt(i, item.GetAddressOf());
-        if (FAILED(hr) || !item) continue;
-
-        PWSTR name = nullptr;
-        hr = item->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &name);
-        if (SUCCEEDED(hr) && name) {
-            paths.emplace_back(name);
-            CoTaskMemFree(name);
-        }
-    }
-    return paths.empty() ? E_FAIL : S_OK;
-}
 
 HRESULT CreateMergedMenu(const std::vector<std::wstring>& paths, MergedMenu& out) {
     if (paths.empty()) return E_INVALIDARG;
@@ -56,9 +32,7 @@ HRESULT CreateMergedMenu(const std::vector<std::wstring>& paths, MergedMenu& out
     out.ownedPidls.push_back(pidlFirst);
 
     Microsoft::WRL::ComPtr<IShellFolder> parent;
-    PCUITEMID_CHILD childFirst = nullptr;
-    hr = SHBindToParent(pidlFirst, IID_IShellFolder,
-                        (void**)parent.GetAddressOf(), &childFirst);
+    hr = SHBindToParent(pidlFirst, IID_IShellFolder, (void**)parent.GetAddressOf(), nullptr);
     if (FAILED(hr) || !parent) {
         Log(L"SHBindToParent failed hr=0x%08X", hr);
         return FAILED(hr) ? hr : E_FAIL;
@@ -67,15 +41,10 @@ HRESULT CreateMergedMenu(const std::vector<std::wstring>& paths, MergedMenu& out
     std::vector<PCUITEMID_CHILD> children;
     for (const auto& path : paths) {
         PIDLIST_ABSOLUTE full = nullptr;
-        hr = SHParseDisplayName(path.c_str(), nullptr, &full, 0, nullptr);
-        if (FAILED(hr) || !full) continue;
+        if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &full, 0, nullptr)) || !full) continue;
         PCUITEMID_CHILD child = ILFindLastID(full);
-        if (child) {
-            children.push_back(child);
-            out.ownedPidls.push_back(full);
-        } else {
-            ILFree(full);
-        }
+        if (child) { children.push_back(child); out.ownedPidls.push_back(full); }
+        else ILFree(full);
     }
     if (children.empty()) return E_FAIL;
 
@@ -90,7 +59,8 @@ HRESULT CreateMergedMenu(const std::vector<std::wstring>& paths, MergedMenu& out
     out.hMenu = CreatePopupMenu();
     if (!out.hMenu) return E_FAIL;
 
-    hr = out.ctx->QueryContextMenu(out.hMenu, 0, kIdFirst, kIdLast, CMF_NORMAL);
+    // Match Explorer's classic-menu context so the same verbs appear.
+    hr = out.ctx->QueryContextMenu(out.hMenu, 0, kIdFirst, kIdLast, CMF_NORMAL | CMF_EXPLORE);
     if (FAILED(hr)) {
         Log(L"QueryContextMenu failed hr=0x%08X", hr);
         return hr;
@@ -139,35 +109,27 @@ void WalkMenu(MergedMenu& merged, HMENU menu, const std::wstring& prefix,
 
 } // namespace
 
-HRESULT BuildLegacyMenuSnapshot(IShellItemArray* selection,
-                                std::vector<FlatLegacyItem>& outItems) {
+HRESULT BuildSnapshot(const std::vector<std::wstring>& paths,
+                      std::vector<FlatLegacyItem>& outItems) {
     outItems.clear();
 
-    std::vector<std::wstring> paths;
-    HRESULT hr = GetSelectionPaths(selection, paths);
+    MergedMenu merged;
+    HRESULT hr = CreateMergedMenu(paths, merged);
     if (FAILED(hr)) {
-        Log(L"snapshot: no selection paths hr=0x%08X", hr);
+        Log(L"BuildSnapshot: CreateMergedMenu hr=0x%08X", hr);
         return hr;
     }
 
-    MergedMenu merged;
-    hr = CreateMergedMenu(paths, merged);
-    if (FAILED(hr)) return hr;
-
     WalkMenu(merged, merged.hMenu, L"", outItems);
-    Log(L"snapshot: %zu path(s), %zu item(s) for %s",
+    Log(L"BuildSnapshot: %zu path(s), %zu item(s) for %s",
         paths.size(), outItems.size(), paths[0].c_str());
     return S_OK;
 }
 
-HRESULT InvokeLegacyItem(IShellItemArray* selection, UINT offset,
-                         const std::wstring& title) {
-    std::vector<std::wstring> paths;
-    HRESULT hr = GetSelectionPaths(selection, paths);
-    if (FAILED(hr)) return hr;
-
+HRESULT Invoke(const std::vector<std::wstring>& paths, UINT offset,
+               const std::wstring& title) {
     MergedMenu merged;
-    hr = CreateMergedMenu(paths, merged);
+    HRESULT hr = CreateMergedMenu(paths, merged);
     if (FAILED(hr)) return hr;
 
     std::vector<FlatLegacyItem> current;
@@ -175,9 +137,6 @@ HRESULT InvokeLegacyItem(IShellItemArray* selection, UINT offset,
 
     UINT chosen = 0;
     bool found = false;
-
-    // Prefer an exact match (offset + title). Then fall back to title only,
-    // which survives handlers that reorder their items between builds.
     for (const auto& it : current) {
         if (it.offset == offset && it.title == title) { chosen = it.offset; found = true; break; }
     }
@@ -186,10 +145,8 @@ HRESULT InvokeLegacyItem(IShellItemArray* selection, UINT offset,
             if (it.title == title) { chosen = it.offset; found = true; break; }
         }
     }
-
     if (!found) {
-        Log(L"invoke: no match for offset=%u title=%s (order changed)",
-            offset, title.c_str());
+        Log(L"invoke: no match for offset=%u title=%s (order changed)", offset, title.c_str());
         return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
     }
 

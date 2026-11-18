@@ -39,7 +39,7 @@ public:
     STDMETHODIMP CreateInstance(IUnknown* outer, REFIID riid, void** ppv) override {
         if (outer) return CLASS_E_NOAGGREGATION;
         return legacy::CLegacyCommand::Create(legacy::CLegacyCommand::Kind::Root,
-                                              nullptr, 0, L"", L"", riid, ppv);
+                                              nullptr, {}, 0, L"", L"", riid, ppv);
     }
 
     STDMETHODIMP LockServer(BOOL lock) override {

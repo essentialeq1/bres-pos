@@ -27,6 +27,8 @@ private:
     std::vector<Microsoft::WRL::ComPtr<IExplorerCommand>> _items;
 };
 
+// Thin in-process shell extension. It never touches legacy handler DLLs
+// itself; it delegates all heavy work to LegacyMenuBridge.exe (the worker).
 class CLegacyCommand final : public IExplorerCommand,
                              public IObjectWithSelection,
                              public IShellExtInit {
@@ -37,6 +39,7 @@ public:
 
     static HRESULT Create(Kind kind,
                           const Microsoft::WRL::ComPtr<IShellItemArray>& selection,
+                          const std::vector<std::wstring>& paths,
                           UINT offset,
                           const std::wstring& title,
                           const std::wstring& icon,
@@ -69,6 +72,7 @@ private:
     std::wstring _title;
     std::wstring _icon;
     Microsoft::WRL::ComPtr<IShellItemArray> _selection;
+    std::vector<std::wstring> _paths;
 };
 
 } // namespace legacy

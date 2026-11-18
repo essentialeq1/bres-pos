@@ -22,13 +22,6 @@ jobs:
         with:
           arch: x64
 
-      - name: Toolchain versions
-        shell: pwsh
-        run: |
-          cmake --version
-          (Get-Command ninja -ErrorAction SilentlyContinue).Source
-          cl 2>&1 | Select-Object -First 1
-
       - name: Configure (Ninja, Release)
         run: cmake -S native -B native/build/x64 -G Ninja -DCMAKE_BUILD_TYPE=Release
 
@@ -38,6 +31,11 @@ jobs:
       - name: Show outputs
         shell: pwsh
         run: Get-ChildItem native/build/x64 | Format-Table Name, Length
+
+      - name: Self-test enumeration (informational)
+        shell: pwsh
+        run: |
+          & native/build/x64/LegacyMenuBridge.exe --selftest
 
       - name: Validate manifest XML
         shell: pwsh
@@ -58,7 +56,11 @@ jobs:
           Copy-Item "native/packaging/Assets" $dist -Recurse
           Copy-Item "native/packaging/register.ps1" $dist
           Copy-Item "native/packaging/unregister.ps1" $dist
+          Copy-Item "native/packaging/install.bat" $dist
+          Copy-Item "native/packaging/uninstall.bat" $dist
           Copy-Item "native/packaging/create-cert.ps1" $dist
+          Copy-Item "native/packaging/sign.ps1" $dist
+          Copy-Item "native/packaging/make-msix.ps1" $dist
           Copy-Item "native/packaging/INSTALL.txt" $dist
           Compress-Archive -Path "$dist/*" -DestinationPath "dist/LegacyMenuBridge-native-x64.zip" -Force
 

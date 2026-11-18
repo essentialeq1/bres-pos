@@ -11,6 +11,12 @@ into JSON; this version is a real shell extension.
 
 ## How it works
 
+> **Note (v0.1.8+):** the heavy/enumeration work now runs in a **separate worker
+> process** (`LegacyMenuBridge.exe`). The in-process DLL (`LegacyMenuBridge.dll`) is a
+> thin shim that only spawns that worker, so a crashing legacy handler can never take
+> Explorer down.
+
+
 1. Windows 11 opens the modern menu and hands our `IExplorerCommand` the
    selection (`IShellItemArray`) via `IObjectWithSelection::SetSelection`.
 2. `EnumSubCommands()` **silently builds the real classic menu** for that exact
