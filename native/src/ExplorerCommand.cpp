@@ -53,6 +53,20 @@ std::wstring QuoteArg(const std::wstring& a) {
     return q;
 }
 
+struct PipeReaderContext {
+    HANDLE pipe = nullptr;
+    std::string bytes;
+};
+
+DWORD WINAPI PipeReaderThread(PVOID param) {
+    auto* ctx = static_cast<PipeReaderContext*>(param);
+    char buf[4096];
+    DWORD n = 0;
+    while (ReadFile(ctx->pipe, buf, sizeof(buf), &n, nullptr) && n > 0)
+        ctx->bytes.append(buf, n);
+    return 0;
+}
+
 std::wstring WorkerExePath() {
     wchar_t dir[MAX_PATH] = { 0 };
     if (g_hInst) {
@@ -64,7 +78,7 @@ std::wstring WorkerExePath() {
     return std::wstring(dir) + L"\\LegacyMenuBridge.exe";
 }
 
-bool LaunchWorker(const std::vector<std::wstring>& args, std::wstring& output) {
+bool LaunchWorker(const std::vector<std::wstring>& args, std::wstring& output, DWORD timeoutMs = 15000) {
     output.clear();
     std::wstring exe = WorkerExePath();
     if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -95,18 +109,45 @@ bool LaunchWorker(const std::vector<std::wstring>& args, std::wstring& output) {
         return false;
     }
 
-    std::string bytes;
-    char buf[4096];
-    DWORD n = 0;
-    while (ReadFile(hRead, buf, sizeof(buf), &n, nullptr) && n > 0)
-        bytes.append(buf, n);
-    CloseHandle(hRead);
+    // Start a reader thread so a hung worker can never block this caller
+    // (and therefore never block Explorer's context-menu thread) forever.
+    PipeReaderContext reader;
+    reader.pipe = hRead;
+    HANDLE hThread = CreateThread(nullptr, 0, PipeReaderThread, &reader, 0, nullptr);
+    if (!hThread) {
+        // Fallback: bounded, non-blocking read via PeekNamedPipe.
+        DWORD start = GetTickCount();
+        char cbuf[4096];
+        DWORD cn = 0;
+        while (true) {
+            DWORD avail = 0;
+            if (!PeekNamedPipe(hRead, nullptr, 0, nullptr, &avail, nullptr)) break;
+            if (avail == 0) {
+                if (WaitForSingleObject(pi.hProcess, 40) == WAIT_OBJECT_0) break;
+                if ((GetTickCount() - start) >= timeoutMs) { TerminateProcess(pi.hProcess, 1); break; }
+                continue;
+            }
+            DWORD toRead = avail < sizeof(cbuf) ? avail : (DWORD)sizeof(cbuf);
+            if (!ReadFile(hRead, cbuf, toRead, &cn, nullptr) || cn == 0) break;
+            reader.bytes.append(cbuf, cn);
+            start = GetTickCount();
+        }
+    } else {
+        if (WaitForSingleObject(pi.hProcess, timeoutMs) == WAIT_TIMEOUT) {
+            Log(L"worker timed out after %lu ms; terminating (Explorer stays alive)", (unsigned long)timeoutMs);
+            TerminateProcess(pi.hProcess, 1);
+        }
+        // When the worker dies, the pipe write end closes and the reader thread
+        // drains remaining bytes then exits.
+        WaitForSingleObject(hThread, 3000);
+        CloseHandle(hThread);
+    }
 
-    if (WaitForSingleObject(pi.hProcess, 30000) == WAIT_TIMEOUT)
-        TerminateProcess(pi.hProcess, 1);
+    CloseHandle(hRead);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
 
+    const std::string& bytes = reader.bytes;
     int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), (int)bytes.size(), nullptr, 0);
     if (wlen > 0) {
         output.resize(wlen);
@@ -256,7 +297,7 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
     args.insert(args.end(), paths.begin(), paths.end());
 
     std::wstring output;
-    if (!LaunchWorker(args, output)) {
+    if (!LaunchWorker(args, output, 3000)) {
         Log(L"EnumSubCommands: worker launch failed");
         return CEnumExplorerCommand::Create({}, ppEnum);
     }
@@ -291,7 +332,7 @@ STDMETHODIMP CLegacyCommand::Invoke(IShellItemArray* psiItemArray, IBindCtx*) {
     args.insert(args.end(), paths.begin(), paths.end());
 
     std::wstring output;
-    if (!LaunchWorker(args, output)) return E_FAIL;
+    if (!LaunchWorker(args, output, 15000)) return E_FAIL;
     Log(L"Invoke: worker output=%s", output.c_str());
 
     if (output.find(L"NOTFOUND") == 0) {
