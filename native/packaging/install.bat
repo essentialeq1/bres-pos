@@ -11,6 +11,13 @@ if %errorlevel% neq 0 (
 cd /d "%~dp0"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0register.ps1"
+if %errorlevel% neq 0 (
+    echo.
+    echo INSTALL FAILED. See the error above - do not close this window yet.
+    pause
+    exit /b 1
+)
+
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0diagnose.ps1"
 echo.

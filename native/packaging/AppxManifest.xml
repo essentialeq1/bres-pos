@@ -55,7 +55,7 @@
             <com:SurrogateServer DisplayName="LegacyMenuBridge context menu">
               <com:Class Id="B7F3A2C1-9D4E-4F6A-8B2C-5E1D3A7F9B04"
                          Path="LegacyMenuBridge.dll"
-                         ThreadingModel="STA" />
+                         ThreadingModel="Both" />
             </com:SurrogateServer>
             <com:ProgId Id="LegacyMenuBridge.Command" Clsid="B7F3A2C1-9D4E-4F6A-8B2C-5E1D3A7F9B04" />
           </com:ComServer>

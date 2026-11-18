@@ -182,6 +182,10 @@ std::vector<FlatLegacyItem> ParseEnumeration(const std::wstring& s) {
     return items;
 }
 
+const wchar_t* KindStr(CLegacyCommand::Kind k) {
+    return k == CLegacyCommand::Kind::Root ? L"root" : L"item";
+}
+
 } // namespace
 
 CLegacyCommand::CLegacyCommand() : _ref(1), _kind(Kind::Root), _offset(0) {}
@@ -234,6 +238,7 @@ STDMETHODIMP_(ULONG) CLegacyCommand::Release() {
 }
 
 STDMETHODIMP CLegacyCommand::GetTitle(IShellItemArray* psiItemArray, LPWSTR* ppszName) {
+    Log(L"GetTitle(%s)", KindStr(_kind));
     if (!ppszName) return E_POINTER;
     if (!_selection && psiItemArray) _selection = psiItemArray;
     if (_kind == Kind::Root) return DuplicateString(L"Classic Menu", ppszName);
@@ -241,6 +246,7 @@ STDMETHODIMP CLegacyCommand::GetTitle(IShellItemArray* psiItemArray, LPWSTR* pps
 }
 
 STDMETHODIMP CLegacyCommand::GetIcon(IShellItemArray* psiItemArray, LPWSTR* ppszIcon) {
+    Log(L"GetIcon(%s)", KindStr(_kind));
     if (!ppszIcon) return E_POINTER;
     if (!_selection && psiItemArray) _selection = psiItemArray;
     *ppszIcon = nullptr;
@@ -257,11 +263,13 @@ STDMETHODIMP CLegacyCommand::GetIcon(IShellItemArray* psiItemArray, LPWSTR* ppsz
 }
 
 STDMETHODIMP CLegacyCommand::GetToolTip(IShellItemArray*, LPWSTR* ppszInfotip) {
+    Log(L"GetToolTip(%s)", KindStr(_kind));
     if (ppszInfotip) *ppszInfotip = nullptr;
     return S_FALSE;
 }
 
 STDMETHODIMP CLegacyCommand::GetCanonicalName(GUID* pguidCommandName) {
+    Log(L"GetCanonicalName(%s)", KindStr(_kind));
     if (!pguidCommandName) return E_POINTER;
     *pguidCommandName = GUID_RootCommand;
     if (_kind == Kind::Item) pguidCommandName->Data1 = GUID_RootCommand.Data1 + _offset + 1;
@@ -269,6 +277,7 @@ STDMETHODIMP CLegacyCommand::GetCanonicalName(GUID* pguidCommandName) {
 }
 
 STDMETHODIMP CLegacyCommand::GetState(IShellItemArray* psiItemArray, BOOL, EXPCMDSTATE* pCmdState) {
+    Log(L"GetState(%s)", KindStr(_kind));
     if (!pCmdState) return E_POINTER;
     if (!_selection && psiItemArray) _selection = psiItemArray;
     *pCmdState = ECS_ENABLED;
@@ -276,6 +285,7 @@ STDMETHODIMP CLegacyCommand::GetState(IShellItemArray* psiItemArray, BOOL, EXPCM
 }
 
 STDMETHODIMP CLegacyCommand::GetFlags(EXPCMDFLAGS* pFlags) {
+    Log(L"GetFlags(%s)", KindStr(_kind));
     if (!pFlags) return E_POINTER;
     *pFlags = (_kind == Kind::Root) ? ECF_HASSUBCOMMANDS : ECF_DEFAULT;
     return S_OK;

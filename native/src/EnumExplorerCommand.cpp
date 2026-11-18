@@ -1,5 +1,6 @@
 #include "Common.h"
 #include "ExplorerCommand.h"
+#include "Log.h"
 
 #include <new>
 
@@ -41,6 +42,7 @@ STDMETHODIMP_(ULONG) CEnumExplorerCommand::Release() {
 }
 
 STDMETHODIMP CEnumExplorerCommand::Next(ULONG celt, IExplorerCommand** pUICommand, ULONG* pceltFetched) {
+    Log(L"Enum.Next celt=%lu", (unsigned long)celt);
     if (!pUICommand) return E_POINTER;
     ULONG fetched = 0;
     while (fetched < celt && _index < _items.size()) {
