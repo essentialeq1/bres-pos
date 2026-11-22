@@ -20,6 +20,11 @@ constexpr UINT kIdFirst = 1;
 constexpr UINT kIdLast  = 0x7FFF;
 constexpr int  kMaxDepth = 12;
 
+// SEE_MASK_UNICODE (aliased by shlobj.h as CMIC_MASK_UNICODE). shlobj.h defines
+// CMIC_MASK_UNICODE in terms of SEE_MASK_UNICODE, which is not visible under
+// WIN32_LEAN_AND_MEAN, so we use the documented bit value directly.
+constexpr UINT kInvokeUnicodeFlag = 0x00004000;
+
 struct MergedMenu {
     Microsoft::WRL::ComPtr<IContextMenu>  ctx;
     Microsoft::WRL::ComPtr<IContextMenu2> ctx2;
@@ -272,7 +277,7 @@ HRESULT Invoke(const std::vector<std::wstring>& paths, UINT offset,
 
         CMINVOKECOMMANDINFOEX info = { 0 };
         info.cbSize = sizeof(info);
-        info.fMask = CMIC_MASK_UNICODE;
+        info.fMask = kInvokeUnicodeFlag;
         info.hwnd = InvokeOwnerWindow();
         info.lpVerb = verbA.empty() ? nullptr : verbA.c_str();
         info.lpVerbW = verb.c_str();

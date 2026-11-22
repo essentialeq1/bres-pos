@@ -5,6 +5,7 @@
 
 #include <cwchar>
 #include <cstdlib>
+#include <jobapi2.h>
 #include <map>
 #include <mutex>
 
