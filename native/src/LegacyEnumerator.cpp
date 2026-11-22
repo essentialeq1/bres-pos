@@ -5,6 +5,7 @@
 #include <shlobj.h>
 #include <shobjidl_core.h>
 #include <shlwapi.h>
+#include <winreg.h>
 
 #include <cwchar>
 
@@ -119,32 +120,162 @@ bool EqualsI(const std::wstring& a, const wchar_t* b) {
 }
 
 // Shell items that already exist in the Windows 11 modern menu. Hidden only at
-// the top level, never inside submenus (so "Send to" and app submenus keep
-// every entry).
+// the top level (both leaf items and shell-owned submenus such as "Send to",
+// "Give access to" and "Open with"); app submenus (7-Zip, Kaspersky, ...) and
+// everything inside them are always preserved.
 bool IsShellBuiltin(const std::wstring& verb, const std::wstring& title) {
     static const wchar_t* kVerbs[] = {
-        L"open", L"openas", L"edit", L"play", L"print", L"printto", L"runas",
-        L"find", L"cut", L"copy", L"paste", L"pasteshortcut", L"delete",
-        L"rename", L"properties", L"link", L"pin", L"unpin",
-        L"pintostartscreen", L"pintotaskbar", L"pintohome",
-        L"pintoquickaccess", L"share", L"windows.share", L"cast",
-        L"casttodevice", L"addtoplaylist", L"includelibrary",
+        L"open", L"openas", L"opennew", L"opennewwindow", L"opennewprocess",
+        L"opencontaining", L"explore", L"edit", L"play", L"preview",
+        L"print", L"printto", L"runas", L"runasuser", L"find",
+        L"cut", L"copy", L"paste", L"pasteshortcut", L"delete",
+        L"rename", L"properties", L"link", L"pin", L"unpin", L"pinfromstart",
+        L"pintostartscreen", L"pintotaskbar", L"pintohome", L"pintoquickaccess",
+        L"unpinfromstart", L"unpinfromtaskbar", L"unpinfromhome",
+        L"removefromhome", L"unpinfromquickaccess", L"windows.unpinfromquickaccess",
+        L"share", L"windows.share", L"modernsharing", L"cast",
+        L"casttodevice", L"addtoplaylist", L"addtofavorites", L"includelibrary",
+        L"troubleshootcompatibility", L"compatibility",
         L"rotateright", L"rotateleft", L"previousversions",
         L"restorepreviousversions", L"undo",
     };
     for (auto* v : kVerbs) if (EqualsI(verb, v)) return true;
 
     static const wchar_t* kTitles[] = {
+        L"Open", L"Open with", L"Open file location",
+        L"Open in new window", L"Open in new process",
         L"Copy as path", L"Give access to", L"Cast to Device",
         L"Restore previous versions", L"Pin to Start", L"Pin to taskbar",
-        L"Pin to Quick access", L"Create shortcut", L"Open", L"Open with",
+        L"Pin to Quick access", L"Create shortcut",
+        L"Send to", L"Share", L"Include in library", L"Add to library",
+        L"Add to favorites", L"Troubleshoot", L"Troubleshoot compatibility",
+        L"Compress to ZIP file", L"Extract All",
     };
     for (auto* t : kTitles) if (EqualsI(title, t)) return true;
     return false;
 }
 
+// ---- per-item icon resolution --------------------------------------------
+// GCS_VERBICONW frequently returns a bare relative name ("imageres.dll,-78")
+// or an unquoted path with spaces. The modern menu only resolves absolute,
+// properly-quoted "path,index" locations, so normalize everything first.
+std::wstring NormalizeIconLocation(const std::wstring& raw) {
+    std::wstring s = raw;
+    while (!s.empty() && (s.front() == L' ' || s.front() == L'\t')) s.erase(s.begin());
+    while (!s.empty() && (s.back() == L' ' || s.back() == L'\t')) s.pop_back();
+    if (s.size() >= 2 && s.front() == L'"' && s.back() == L'"')
+        s = s.substr(1, s.size() - 2);
+    if (s.empty()) return L"";
+
+    std::wstring path = s;
+    std::wstring index;
+    const size_t comma = s.find_last_of(L',');
+    if (comma != std::wstring::npos) {
+        const std::wstring tail = s.substr(comma + 1);
+        bool isIndex = !tail.empty();
+        bool hasDigit = false;
+        for (wchar_t c : tail) {
+            if (c >= L'0' && c <= L'9') hasDigit = true;
+            else if (c != L'-') { isIndex = false; break; }
+        }
+        if (isIndex && hasDigit) {
+            path = s.substr(0, comma);
+            index = tail;
+        }
+    }
+    if (index.empty()) index = L"0";
+
+    if (path.size() >= 2 && path.front() == L'"' && path.back() == L'"')
+        path = path.substr(1, path.size() - 2);
+
+    if (path.find(L'%') != std::wstring::npos) {
+        wchar_t buf[2048] = { 0 };
+        const DWORD n = ExpandEnvironmentStringsW(path.c_str(), buf, _countof(buf));
+        if (n > 0 && n <= _countof(buf)) path = buf;
+    }
+
+    const bool absolute = (path.size() >= 2 && path[1] == L':') ||
+                          (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\');
+    if (!absolute) {
+        wchar_t sys[MAX_PATH] = { 0 };
+        if (GetSystemDirectoryW(sys, MAX_PATH))
+            path = (path.size() >= 1 && path[0] == L'\\')
+                     ? std::wstring(sys) + path
+                     : std::wstring(sys) + L"\\" + path;
+    }
+
+    if (path.find(L' ') != std::wstring::npos &&
+        !(path.size() >= 2 && path.front() == L'"' && path.back() == L'"'))
+        path = L"\"" + path + L"\"";
+
+    return path + L"," + index;
+}
+
+std::wstring RegReadIconValue(const std::wstring& subkey) {
+    wchar_t buf[2048] = { 0 };
+    DWORD cb = sizeof(buf);
+    const LSTATUS st = RegGetValueW(HKEY_CLASSES_ROOT, subkey.c_str(), L"Icon",
+                                    RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
+                                    nullptr, buf, &cb);
+    if (st != ERROR_SUCCESS) return L"";
+    return buf;
+}
+
+// Static verbs register their icon under "shell\<verb>" (the "Icon" value).
+// This recovers icons (e.g. the "Take ownership" shield) when the merged menu's
+// GCS_VERBICONW answer is empty or only a bare name.
+std::wstring ResolveVerbIconFromRegistry(const std::wstring& verb,
+                                         const std::wstring& firstPath) {
+    if (verb.empty()) return L"";
+
+    if (!firstPath.empty()) {
+        wchar_t progid[512] = { 0 };
+        DWORD cch = _countof(progid);
+        if (SUCCEEDED(AssocQueryStringW(0, ASSOCSTR_PROGID, firstPath.c_str(),
+                                        nullptr, progid, &cch)) &&
+            cch > 0 && progid[0]) {
+            std::wstring value =
+                RegReadIconValue(std::wstring(progid) + L"\\shell\\" + verb);
+            if (!value.empty()) return NormalizeIconLocation(value);
+        }
+    }
+
+    static const wchar_t* kRoots[] = {
+        L"*\\shell\\", L"Directory\\shell\\", L"Drive\\shell\\",
+        L"Folder\\shell\\", L"AllFilesystemObjects\\shell\\",
+    };
+    for (const auto* root : kRoots) {
+        std::wstring value = RegReadIconValue(std::wstring(root) + verb);
+        if (!value.empty()) return NormalizeIconLocation(value);
+    }
+    return L"";
+}
+
+std::wstring ShieldIconLocation() {
+    wchar_t sys[MAX_PATH] = { 0 };
+    if (!GetSystemDirectoryW(sys, MAX_PATH)) return L"";
+    return std::wstring(sys) + L"\\imageres.dll,-78";
+}
+
+std::wstring ResolveItemIcon(IContextMenu* ctx, UINT offset,
+                             const std::wstring& verb,
+                             const std::wstring& firstPath) {
+    std::wstring icon =
+        NormalizeIconLocation(GetCommandStringText(ctx, offset, GCS_VERBICONW));
+    if (!icon.empty()) return icon;
+
+    icon = ResolveVerbIconFromRegistry(verb, firstPath);
+    if (!icon.empty()) return icon;
+
+    // Elevated verbs ("run as administrator", "take ownership") draw the same
+    // UAC shield; synthesize it when nothing else provided an icon.
+    if (EqualsI(verb, L"runas") || EqualsI(verb, L"runasuser"))
+        return ShieldIconLocation();
+    return L"";
+}
+
 void WalkMenu(MergedMenu& merged, HMENU menu, int depth, bool hideShell,
-              std::vector<LegacyMenuItem>& out) {
+              const std::wstring& firstPath, std::vector<LegacyMenuItem>& out) {
     if (!menu || depth > kMaxDepth) return;
 
     // Let the handler add lazy items (Send to, dynamic submenus) first.
@@ -172,8 +303,12 @@ void WalkMenu(MergedMenu& merged, HMENU menu, int depth, bool hideShell,
         if (text.empty()) continue;
 
         if (mii.hSubMenu) {
+            // Hide shell-owned submenus ("Send to", "Give access to", "Open
+            // with", ...) at the top level, keeping app submenus intact.
+            if (hideShell && depth == 0 && IsShellBuiltin(verb, text)) continue;
+
             std::vector<LegacyMenuItem> kids;
-            WalkMenu(merged, mii.hSubMenu, depth + 1, hideShell, kids);
+            WalkMenu(merged, mii.hSubMenu, depth + 1, hideShell, firstPath, kids);
             if (kids.empty()) continue;           // don't show empty submenus
 
             LegacyMenuItem node;
@@ -194,7 +329,7 @@ void WalkMenu(MergedMenu& merged, HMENU menu, int depth, bool hideShell,
         node.title = text;
         node.verb = verb;
         node.offset = offset;
-        if (inRange) node.icon = GetCommandStringText(merged.ctx.Get(), offset, GCS_VERBICONW);
+        if (inRange) node.icon = ResolveItemIcon(merged.ctx.Get(), offset, verb, firstPath);
         out.push_back(std::move(node));
     }
 }
@@ -249,7 +384,8 @@ HRESULT BuildSnapshot(const std::vector<std::wstring>& paths,
         return hr;
     }
 
-    WalkMenu(merged, merged.hMenu, 0, hideShellBuiltins, outItems);
+    const std::wstring firstPath = paths.empty() ? L"" : paths[0];
+    WalkMenu(merged, merged.hMenu, 0, hideShellBuiltins, firstPath, outItems);
     Log(L"BuildSnapshot: %zu path(s), %zu item(s) for %s",
         paths.size(), CountItems(outItems), paths[0].c_str());
     return S_OK;
@@ -293,7 +429,7 @@ HRESULT Invoke(const std::vector<std::wstring>& paths, UINT offset,
     // Fallback for handlers that expose no verb: rebuild, find the item by
     // offset+title (or by title alone), then invoke by its command offset.
     std::vector<LegacyMenuItem> current;
-    WalkMenu(merged, merged.hMenu, 0, false, current);
+    WalkMenu(merged, merged.hMenu, 0, false, paths.empty() ? L"" : paths[0], current);
 
     const LegacyMenuItem* hit = FindByOffset(current, offset, title);
     if (!hit) hit = FindByTitle(current, title);

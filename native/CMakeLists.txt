@@ -43,7 +43,7 @@ add_executable(LegacyMenuBridgeHost
     src/Log.cpp
 )
 target_include_directories(LegacyMenuBridgeHost PRIVATE src)
-target_link_libraries(LegacyMenuBridgeHost PRIVATE shell32 ole32 shlwapi user32 uuid)
+target_link_libraries(LegacyMenuBridgeHost PRIVATE shell32 ole32 shlwapi advapi32 user32 uuid)
 set_target_properties(LegacyMenuBridgeHost PROPERTIES PREFIX "" SUFFIX ".exe" OUTPUT_NAME "LegacyMenuBridge")
 
 if(MSVC)

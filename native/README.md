@@ -102,10 +102,13 @@ contains the legacy items as **nested submenus** (no more flattening), with
 per-item icons when the handler provides them. Picking any item runs it through
 the real legacy handler.
 
-By default the shell's own duplicate verbs (Open, Copy, Cut, Delete, Rename,
-Properties, Pin to…, Create shortcut, …) are hidden at the top level so the
-flyout focuses on app options. Set the environment variable
-`LEGACYBRIDGE_SHOW_SHELL=1` (then restart Explorer) to show them again.
+By default the shell's own duplicate entries (Open, Open with, Send to, Give
+access to, Copy as path, Copy, Cut, Delete, Rename, Properties, Pin to…, Create
+shortcut, Include in library, Troubleshoot compatibility, …) are hidden at the
+top level so the flyout focuses on app options. App-owned submenus (7-Zip,
+Kaspersky, …) and everything inside them are preserved. Set the environment
+variable `LEGACYBRIDGE_SHOW_SHELL=1` (then restart Explorer) to show them all
+again.
 
 ## Known limitations (milestone 1)
 
@@ -115,8 +118,10 @@ flyout focuses on app options. Set the environment variable
 - Handlers that only create owner-draw (`MFT_OWNERDRAW`) items whose text is not
   available via `GetCommandString` may be listed with a fallback verb name or
   skipped.
-- The per-item icon is only as good as the handler's `GCS_VERBICONW` answer;
-  items without one fall back to the module icon.
+- Per-item icons come first from `GCS_VERBICONW` (normalized to an absolute,
+  quoted `"path",index`), then from the verb's registry `Icon` value, then — for
+  elevated `runas`/`runasuser` verbs — the UAC shield (`imageres.dll,-78`).
+  Items with none of those fall back to the module icon.
 - Registered for files (`*`) and folders (`Directory`). Drive/background can be
   added in the manifest with `desktop10:ItemType Type="Drive"` /
   `"DesktopBackground"` (Win11 22H2+).
