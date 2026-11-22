@@ -24,17 +24,19 @@ into JSON; this version is a real shell extension.
    `GetUIObjectOf(IID_IContextMenu)`, then `QueryContextMenu` into a hidden
    `HMENU`. That single object already contains the static verbs **and** every
    registered `ContextMenuHandlers` entry - i.e. the old menu in its entirety.
-3. We walk the hidden menu (recursing into submenus), flatten it, and return one
-   `IExplorerCommand` per actionable item. The hidden menu and COM objects are
-   then released (capture-then-close).
-4. When the user picks an item, `Invoke()` **rebuilds** the classic menu for the
-   same selection and calls `IContextMenu::InvokeCommand` for the matching item
-   (matched by verb/id, then by title). If the menu changed order and no match
-   exists, a small popup asks the user to re-open the menu.
+3. We walk the hidden menu (recursing into submenus and forwarding
+   `WM_INITMENUPOPUP` so lazy submenus like *Send to* are populated), keeping
+   the **tree structure**, each item's canonical **verb** and **icon**
+   location, and return the result to the modern menu.
+4. When the user picks an item, `Invoke()` re-runs the worker and invokes the
+   chosen item **by its canonical verb** when available (which is what makes
+   Copy/Cut/Delete/Properties/Pin to Start work), otherwise by command id
+   (matched by offset, then by title).
 
-The first use is slow (~1-2s) because the legacy handler DLLs are cold; after
-that the host process stays resident, so handler DLLs stay warm and the menu is
-built instantly.
+The first use is slow (~1-2s) because legacy handler DLLs are cold. The worker
+process then stays resident (`--serve`), keeping those handler DLLs warm, and
+the snapshot is cached per selection — so later menus open almost instantly and
+the other modern extensions are no longer held up.
 
 ## Files
 
@@ -42,13 +44,15 @@ built instantly.
 |------|---------|
 | `src/Common.h` | Common Win32/SDK includes |
 | `src/Guid.h` | CLSID of the command provider |
-| `src/MenuModel.h` | `FlatLegacyItem` descriptor |
+| `src/MenuModel.h` | `LegacyMenuItem` tree (title / verb / icon / children) |
 | `src/Log.h/.cpp` | File + debug logger (`%TEMP%\LegacyMenuBridgeNative-*.log`) |
 | `src/LegacyEnumerator.h/.cpp` | Build/snapshot/re-invoke the classic menu (the core) |
+| `src/Snapshot.h/.cpp` | Persistent worker + framing protocol + per-selection cache |
 | `src/ExplorerCommand.h/.cpp` | `IExplorerCommand` + `IEnumExplorerCommand` + `IObjectWithSelection` + `IShellExtInit` |
 | `src/EnumExplorerCommand.cpp` | Sub-command enumerator |
 | `src/dllmain.cpp` | `DllGetClassObject`, class factory, exports |
-| `src/main.cpp` | Tiny host EXE required by the manifest |
+| `src/main.cpp` | Worker EXE (`--serve` loop, `--oneshot`, `--dump`, `--selftest`, `--comtest`) |
+| `src/LegacyMenuBridge.rc.in` | Embedded module icon (generated to `.rc`) |
 | `src/exports.def` | COM exports |
 | `packaging/AppxManifest.xml` | Sparse package: COM server + `windows.fileExplorerContextMenus` |
 | `packaging/*.ps1` | build / create-cert / register / unregister |
@@ -93,25 +97,31 @@ Explorer > Restart) or sign out and back in.
 
 ## Using it
 
-Right-click a file or folder in Explorer and choose **Classic Menu**. The
-flyout contains the legacy items (with submenus flattened as `Parent > Child` so
-they are reachable in one click). Picking any item runs it through the real
-legacy handler.
+Right-click a file or folder in Explorer and choose **Classic Menu**. The flyout
+contains the legacy items as **nested submenus** (no more flattening), with
+per-item icons when the handler provides them. Picking any item runs it through
+the real legacy handler.
+
+By default the shell's own duplicate verbs (Open, Copy, Cut, Delete, Rename,
+Properties, Pin to…, Create shortcut, …) are hidden at the top level so the
+flyout focuses on app options. Set the environment variable
+`LEGACYBRIDGE_SHOW_SHELL=1` (then restart Explorer) to show them again.
 
 ## Known limitations (milestone 1)
 
 - Items live under one modern-menu entry (`Classic Menu`) because Windows groups
   a multi-verb extension into a flyout; the items themselves are no longer
   behind *Show more options*.
-- Submenus are flattened into the title (`7-Zip > Extract Here`) rather than
-  reproduced as nested menus.
-- Handlers that only create items when a submenu is opened (advanced
-  `IContextMenu2/3` behaviour) may not be listed yet.
+- Handlers that only create owner-draw (`MFT_OWNERDRAW`) items whose text is not
+  available via `GetCommandString` may be listed with a fallback verb name or
+  skipped.
+- The per-item icon is only as good as the handler's `GCS_VERBICONW` answer;
+  items without one fall back to the module icon.
 - Registered for files (`*`) and folders (`Directory`). Drive/background can be
   added in the manifest with `desktop10:ItemType Type="Drive"` /
   `"DesktopBackground"` (Win11 22H2+).
-- No per-item icons yet, no ordering/customisation (deferred by design).
-- First open is ~1-2s while legacy handler DLLs load.
+- First open of a new selection is ~1-2s while legacy handler DLLs load; later
+  opens reuse the warm worker and per-selection cache.
 
 ## Notes
 

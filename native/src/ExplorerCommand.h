@@ -33,16 +33,14 @@ class CLegacyCommand final : public IExplorerCommand,
                              public IObjectWithSelection,
                              public IShellExtInit {
 public:
-    enum class Kind { Root, Item };
+    enum class Kind { Root, SubMenu, Item };
 
     CLegacyCommand();
 
     static HRESULT Create(Kind kind,
                           const Microsoft::WRL::ComPtr<IShellItemArray>& selection,
                           const std::vector<std::wstring>& paths,
-                          UINT offset,
-                          const std::wstring& title,
-                          const std::wstring& icon,
+                          const LegacyMenuItem& node,
                           REFIID riid,
                           void** ppv);
 
@@ -69,8 +67,11 @@ private:
     LONG _ref;
     Kind _kind;
     UINT _offset;
+    bool _disabled;
     std::wstring _title;
+    std::wstring _verb;
     std::wstring _icon;
+    std::vector<LegacyMenuItem> _children;
     Microsoft::WRL::ComPtr<IShellItemArray> _selection;
     std::vector<std::wstring> _paths;
 };

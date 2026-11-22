@@ -1,13 +1,22 @@
 #pragma once
 #include <string>
+#include <vector>
 
 namespace legacy {
 
-// One flattened option taken from the legacy (classic) context menu.
-struct FlatLegacyItem {
-    std::wstring title;      // display title, already prefixed with submenu context
-    UINT         offset = 0; // command id relative to idCmdFirst (stable on rebuild)
-    std::wstring iconPath;   // optional "file,index"; empty when unknown
+// One node of the real classic (legacy) context menu, preserved as a tree so
+// the modern menu can reproduce nested submenus instead of flattening them.
+//
+//  - Leaves (children.empty()) are actionable items.
+//  - Nodes with children are submenus.
+struct LegacyMenuItem {
+    std::wstring title;   // display text
+    std::wstring verb;    // canonical verb (GCS_VERBW) when the handler exposes one
+    std::wstring icon;    // "path,index" icon location (GCS_VERBICONW) when known
+    UINT         offset = 0; // command id relative to idCmdFirst (for id invocation)
+    std::vector<LegacyMenuItem> children; // non-empty => submenu
+
+    bool IsSubmenu() const { return !children.empty(); }
 };
 
 } // namespace legacy

@@ -37,6 +37,11 @@ jobs:
         run: |
           & native/build/x64/LegacyMenuBridge.exe --selftest
 
+      - name: Dump classic menu tree (informational)
+        shell: pwsh
+        run: |
+          & native/build/x64/LegacyMenuBridge.exe --dump "$env:WINDIR\System32\notepad.exe" --show-shell
+
       - name: COM method smoke test
         shell: pwsh
         run: |

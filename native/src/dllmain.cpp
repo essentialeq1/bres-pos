@@ -38,8 +38,10 @@ public:
 
     STDMETHODIMP CreateInstance(IUnknown* outer, REFIID riid, void** ppv) override {
         if (outer) return CLASS_E_NOAGGREGATION;
+        legacy::LegacyMenuItem root;
+        root.title = L"Classic Menu";
         return legacy::CLegacyCommand::Create(legacy::CLegacyCommand::Kind::Root,
-                                              nullptr, {}, 0, L"", L"", riid, ppv);
+                                              nullptr, {}, root, riid, ppv);
     }
 
     STDMETHODIMP LockServer(BOOL lock) override {

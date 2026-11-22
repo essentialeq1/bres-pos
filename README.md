@@ -20,11 +20,12 @@ crashing third-party handler can never take Explorer down.
 ## How it works (short version)
 
 1. Windows 11 hands the extension the selected item(s).
-2. The thin DLL spawns the worker, which silently builds the **actual classic
-   menu** for those item(s) (`IShellFolder::GetUIObjectOf(IContextMenu)` +
-   `QueryContextMenu`), reads the items, and returns them to the modern menu.
-3. Picking an item spawns the worker again to rebuild the menu and call
-   `IContextMenu::InvokeCommand` for the chosen item.
+2. The thin DLL talks to a long-lived worker that silently builds the **actual
+   classic menu** for those item(s) (`IShellFolder::GetUIObjectOf(IContextMenu)`
+   + `QueryContextMenu`), reads the nested submenus, verbs and icons, and returns
+   them to the modern menu.
+3. Picking an item tells the worker to invoke it by canonical verb (or command
+   id). Snapshots are cached per selection, so repeat menus open instantly.
 
 Logs: `%TEMP%\LegacyMenuBridgeNative-*.log`
 

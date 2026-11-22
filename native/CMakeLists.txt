@@ -7,13 +7,30 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00)
 
+# --- Embed the app icon (root "Classic Menu" icon + fallback for items) ---
+# The .rc is generated with an absolute icon path so rc.exe resolves it no
+# matter what its working directory is.
+set(APP_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/app.ico")
+set(LMB_RESOURCES)
+if(EXISTS "${APP_ICON_PATH}")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/LegacyMenuBridge.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/LegacyMenuBridge.rc" @ONLY)
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/LegacyMenuBridge.rc"
+                                PROPERTIES GENERATED TRUE)
+    list(APPEND LMB_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/LegacyMenuBridge.rc")
+else()
+    message(WARNING "src/app.ico not found; building without an embedded icon")
+endif()
+
 # --- Shim DLL: in-proc IExplorerCommand; never loads legacy handler DLLs itself ---
 add_library(LegacyMenuBridge SHARED
     src/dllmain.cpp
     src/EnumExplorerCommand.cpp
     src/ExplorerCommand.cpp
+    src/Snapshot.cpp
     src/Log.cpp
     src/exports.def
+    ${LMB_RESOURCES}
 )
 target_include_directories(LegacyMenuBridge PRIVATE src)
 target_link_libraries(LegacyMenuBridge PRIVATE shell32 ole32 oleaut32 shlwapi user32 uuid)
