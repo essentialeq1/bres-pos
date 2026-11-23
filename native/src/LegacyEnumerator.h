@@ -5,6 +5,11 @@
 
 namespace legacy {
 
+// Loads the editable shell-item blocklist (LegacyMenuBridge.blocklist.txt) from
+// the worker's own directory, falling back to the built-in default if the file
+// is missing. Call once at worker start, before any BuildSnapshot.
+void LoadShellBlocklistFromFile();
+
 // Builds the real merged classic menu for the given paths and returns its
 // item tree. Called by the worker process, so a crashing legacy handler can
 // never take Explorer down.

@@ -27,6 +27,11 @@ $assetsDst = Join-Path $InstallDir "Assets"
 if ((Test-Path $assetsSrc) -and ([IO.Path]::GetFullPath($assetsSrc) -ne [IO.Path]::GetFullPath($assetsDst))) {
     Copy-Item $assetsSrc $assetsDst -Recurse -Force
 }
+$blocklistSrc = Join-Path $PSScriptRoot "LegacyMenuBridge.blocklist.txt"
+$blocklistDst = Join-Path $InstallDir "LegacyMenuBridge.blocklist.txt"
+if ((Test-Path $blocklistSrc) -and ([IO.Path]::GetFullPath($blocklistSrc) -ne [IO.Path]::GetFullPath($blocklistDst))) {
+    Copy-Item $blocklistSrc $blocklistDst -Force
+}
 
 try {
     $existing = Get-AppxPackage -Name LegacyMenuBridge -ErrorAction SilentlyContinue

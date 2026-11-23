@@ -8,6 +8,7 @@
 #include <winreg.h>
 
 #include <cwchar>
+#include <cwctype>
 
 // Some SDK builds hide this from WIN32_LEAN_AND_MEAN.
 #ifndef GCS_VERBICONW
@@ -119,39 +120,137 @@ bool EqualsI(const std::wstring& a, const wchar_t* b) {
     return _wcsicmp(a.c_str(), b) == 0;
 }
 
-// Shell items that already exist in the Windows 11 modern menu. Hidden only at
-// the top level (both leaf items and shell-owned submenus such as "Send to",
-// "Give access to" and "Open with"); app submenus (7-Zip, Kaspersky, ...) and
-// everything inside them are always preserved.
-bool IsShellBuiltin(const std::wstring& verb, const std::wstring& title) {
-    static const wchar_t* kVerbs[] = {
-        L"open", L"openas", L"opennew", L"opennewwindow", L"opennewprocess",
-        L"opencontaining", L"explore", L"edit", L"play", L"preview",
-        L"print", L"printto", L"runas", L"runasuser", L"find",
-        L"cut", L"copy", L"paste", L"pasteshortcut", L"delete",
-        L"rename", L"properties", L"link", L"pin", L"unpin", L"pinfromstart",
-        L"pintostartscreen", L"pintotaskbar", L"pintohome", L"pintoquickaccess",
-        L"unpinfromstart", L"unpinfromtaskbar", L"unpinfromhome",
-        L"removefromhome", L"unpinfromquickaccess", L"windows.unpinfromquickaccess",
-        L"share", L"windows.share", L"modernsharing", L"cast",
-        L"casttodevice", L"addtoplaylist", L"addtofavorites", L"includelibrary",
-        L"troubleshootcompatibility", L"compatibility",
-        L"rotateright", L"rotateleft", L"previousversions",
-        L"restorepreviousversions", L"undo",
-    };
-    for (auto* v : kVerbs) if (EqualsI(verb, v)) return true;
+// ---- shell-item blocklist: items the Windows 11 modern menu already shows. ---
+// A menu item is filtered only when its canonical verb OR its normalized title
+// matches an entry (case-insensitive). Only true duplicates belong here, so the
+// modern menu never hides a classic-only action (Print, Edit, Play, Preview,
+// Rotate, Restore previous versions, Set as desktop background, ...). The list
+// lives in LegacyMenuBridge.blocklist.txt next to the worker EXE; the in-code
+// default below is the fallback when that file is missing.
 
-    static const wchar_t* kTitles[] = {
-        L"Open", L"Open with", L"Open file location",
-        L"Open in new window", L"Open in new process",
-        L"Copy as path", L"Give access to", L"Cast to Device",
-        L"Restore previous versions", L"Pin to Start", L"Pin to taskbar",
-        L"Pin to Quick access", L"Create shortcut",
-        L"Send to", L"Share", L"Include in library", L"Add to library",
-        L"Add to favorites", L"Troubleshoot", L"Troubleshoot compatibility",
-        L"Compress to ZIP file", L"Extract All",
+std::wstring LowerWide(const std::wstring& s) {
+    std::wstring r = s;
+    for (auto& c : r) c = static_cast<wchar_t>(towlower(static_cast<wint_t>(c)));
+    return r;
+}
+
+std::wstring TrimWide(const std::wstring& s) {
+    size_t b = 0;
+    size_t e = s.size();
+    auto isSpace = [](wchar_t c) {
+        return c == L' ' || c == L'\t' || c == L'\u00a0' || c == L'\u2007';
     };
-    for (auto* t : kTitles) if (EqualsI(title, t)) return true;
+    while (b < e && isSpace(s[b])) ++b;
+    while (e > b && isSpace(s[e - 1])) --e;
+    return s.substr(b, e - b);
+}
+
+// Strip Win32 display decoration so two menu titles compare reliably:
+// '&' accelerator mnemonics, tab-aligned suffix hints, trailing "..." / "..."
+// ellipses, surrounding whitespace — then lowercase.
+std::wstring NormalizeTitle(const std::wstring& raw) {
+    std::wstring s = raw;
+    const size_t tab = s.find(L'\t');
+    if (tab != std::wstring::npos) s = s.substr(0, tab);
+    while (s.size() >= 3 && s.compare(s.size() - 3, 3, L"...") == 0)
+        s.erase(s.size() - 3);
+    while (!s.empty() && s.back() == L'\u2026') s.pop_back();
+
+    std::wstring out;
+    out.reserve(s.size());
+    for (wchar_t c : s) if (c != L'&') out.push_back(c);
+    return LowerWide(TrimWide(out));
+}
+
+std::vector<std::wstring> DefaultBlocklist() {
+    return {
+        // verbs (true duplicates the modern menu already offers)
+        L"open", L"openas", L"cut", L"copy", L"paste", L"delete", L"rename",
+        L"properties", L"copyaspath", L"sendto", L"share", L"windows.share",
+        L"modernsharing", L"troubleshootcompatibility", L"link",
+        L"pin", L"unpin", L"pinfromstart", L"pintostartscreen", L"pintotaskbar",
+        L"pintohome", L"pintoquickaccess", L"unpinfromstart",
+        L"unpinfromtaskbar", L"unpinfromhome", L"unpinfromquickaccess",
+        L"windows.unpinfromquickaccess",
+        // titles (normalized, multi-word)
+        L"open with", L"copy as path", L"send to", L"troubleshoot compatibility",
+        L"pin to start", L"pin to taskbar", L"pin to quick access",
+        L"create shortcut", L"give access to", L"compress to zip file",
+        L"extract all",
+    };
+}
+
+std::vector<std::wstring> g_blocklist = DefaultBlocklist();
+
+const std::vector<std::wstring>& Blocklist() { return g_blocklist; }
+
+std::wstring Utf8ToWideStr(const std::string& s) {
+    if (s.empty()) return L"";
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+    if (n <= 0) return L"";
+    std::wstring out((size_t)n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &out[0], n);
+    return out;
+}
+
+void LoadBlocklistFromFileImpl() {
+    wchar_t dir[MAX_PATH] = { 0 };
+    GetModuleFileNameW(nullptr, dir, MAX_PATH);
+    wchar_t* slash = wcsrchr(dir, L'\\');
+    if (slash) *slash = 0;
+    const std::wstring path = std::wstring(dir) + L"\\LegacyMenuBridge.blocklist.txt";
+
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;   // keep the built-in default
+
+    DWORD size = GetFileSize(h, nullptr);
+    std::string bytes;
+    if (size != INVALID_FILE_SIZE && size > 0) {
+        bytes.resize(size);
+        DWORD read = 0;
+        if (!ReadFile(h, &bytes[0], size, &read, nullptr)) bytes.clear();
+        else bytes.resize(read);
+    }
+    CloseHandle(h);
+    if (bytes.empty()) return;
+
+    std::vector<std::wstring> entries;
+    size_t pos = 0;
+    while (pos < bytes.size()) {
+        size_t eol = pos;
+        while (eol < bytes.size() && bytes[eol] != '\n') ++eol;
+        std::string line(bytes.data() + pos, eol - pos);
+        pos = eol + 1;
+
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t b = 0, e = line.size();
+        while (b < e && (line[b] == ' ' || line[b] == '\t')) ++b;
+        while (e > b && (line[e - 1] == ' ' || line[e - 1] == '\t')) --e;
+        line = line.substr(b, e - b);
+        if (line.empty() || line[0] == '#') continue;
+
+        // skip a UTF-8 BOM if present
+        if (line.size() >= 3 && (unsigned char)line[0] == 0xEF &&
+            (unsigned char)line[1] == 0xBB && (unsigned char)line[2] == 0xBF)
+            line = line.substr(3);
+
+        std::wstring entry = TrimWide(Utf8ToWideStr(line));
+        if (!entry.empty()) entries.push_back(std::move(entry));
+    }
+
+    if (!entries.empty()) g_blocklist = std::move(entries);
+}
+
+bool IsShellBuiltin(const std::wstring& verb, const std::wstring& title) {
+    const std::wstring nverb = LowerWide(TrimWide(verb));
+    const std::wstring ntitle = NormalizeTitle(title);
+    for (const auto& e : Blocklist()) {
+        const std::wstring ne = LowerWide(TrimWide(e));
+        if (ne.empty()) continue;
+        if (!nverb.empty() && ne == nverb) return true;
+        if (!ntitle.empty() && ne == ntitle) return true;
+    }
     return false;
 }
 
@@ -379,6 +478,8 @@ HWND InvokeOwnerWindow() {
 }
 
 } // namespace
+
+void LoadShellBlocklistFromFile() { LoadBlocklistFromFileImpl(); }
 
 HRESULT BuildSnapshot(const std::vector<std::wstring>& paths,
                       bool hideShellBuiltins,

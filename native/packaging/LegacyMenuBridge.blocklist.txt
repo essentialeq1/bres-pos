@@ -1,0 +1,50 @@
+# LegacyMenuBridge shell-item blocklist
+# One entry per line. An entry matches an item's canonical VERB or its normalized
+# display TITLE (case-insensitive), so only list items the Windows 11 modern menu
+# already shows itself. This keeps classic-only actions (Print, Edit, Play,
+# Preview, Rotate, Restore previous versions, Set as desktop background, ...)
+# visible instead of hiding them.
+#
+# Matching ignores "&" mnemonics, tab-aligned shortcuts, and trailing "...".
+
+# -- verbs (true duplicates) --
+open
+openas
+cut
+copy
+paste
+delete
+rename
+properties
+copyaspath
+sendto
+share
+windows.share
+modernsharing
+troubleshootcompatibility
+link
+pin
+unpin
+pinfromstart
+pintostartscreen
+pintotaskbar
+pintohome
+pintoquickaccess
+unpinfromstart
+unpinfromtaskbar
+unpinfromhome
+unpinfromquickaccess
+windows.unpinfromquickaccess
+
+# -- titles (normalized, multi-word) --
+open with
+copy as path
+send to
+troubleshoot compatibility
+pin to start
+pin to taskbar
+pin to quick access
+create shortcut
+give access to
+compress to zip file
+extract all

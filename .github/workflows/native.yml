@@ -75,6 +75,7 @@ jobs:
           Copy-Item "native/packaging/sign.ps1" $dist
           Copy-Item "native/packaging/make-msix.ps1" $dist
           Copy-Item "native/packaging/INSTALL.txt" $dist
+          Copy-Item "native/packaging/LegacyMenuBridge.blocklist.txt" $dist
           Compress-Archive -Path "$dist/*" -DestinationPath "dist/LegacyMenuBridge-native-x64-$tag.zip" -Force
 
       - name: Upload artifacts

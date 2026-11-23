@@ -200,6 +200,7 @@ static int RunServer(bool oneShot) {
 int wmain(int argc, wchar_t** argv) {
     SetLogComponent(L"worker");
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    LoadShellBlocklistFromFile();
 
     int rc = 0;
 

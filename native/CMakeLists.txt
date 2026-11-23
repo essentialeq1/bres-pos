@@ -55,4 +55,7 @@ add_custom_command(TARGET LegacyMenuBridge POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/packaging/AppxManifest.xml"
             "$<TARGET_FILE_DIR:LegacyMenuBridge>/AppxManifest.xml"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/LegacyMenuBridge.blocklist.txt"
+            "$<TARGET_FILE_DIR:LegacyMenuBridge>/LegacyMenuBridge.blocklist.txt"
     VERBATIM)
