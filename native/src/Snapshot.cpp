@@ -3,11 +3,15 @@
 #include "Log.h"
 #include "Module.h"
 
+#include <chrono>
+#include <condition_variable>
 #include <cwchar>
 #include <cstdlib>
 #include <jobapi2.h>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <thread>
 
 namespace legacy {
 namespace {
@@ -361,7 +365,118 @@ bool RunEnumeration(const std::vector<std::wstring>& paths, bool hideShell,
     return false;
 }
 
+// ---- asynchronous snapshot building ---------------------------------------
+// Building the legacy menu (worker spawn + cold legacy-handler DLL load +
+// QueryContextMenu + icon resolution) can take well over a second. Doing that
+// inside EnumSubCommands would block the shell's menu thread and hold up every
+// other modern extension, so it runs on a detached background thread here and
+// callers only ever block briefly (or not at all) until the result is cached.
+
+struct PendingBuild {
+    std::mutex m;
+    std::condition_variable cv;
+    bool started = false;
+    bool done = false;
+    bool ok = false;
+    std::vector<LegacyMenuItem> tree;
+};
+
+std::mutex g_pendingMutex;
+std::map<std::wstring, std::shared_ptr<PendingBuild>> g_pending;
+
+void RunAsyncBuild(const std::vector<std::wstring>& paths, const std::wstring& key,
+                   const std::shared_ptr<PendingBuild>& pb) {
+    std::vector<LegacyMenuItem> tree;
+    const bool ok = RunEnumeration(paths, HideShellDefault(), tree);
+
+    {
+        std::lock_guard<std::mutex> lk(pb->m);
+        pb->tree = std::move(tree);
+        pb->ok = ok;
+        pb->done = true;
+    }
+    pb->cv.notify_all();
+
+    // Publish a successful result to the shared cache so the next open is a
+    // pure cache hit (no worker round-trip).
+    if (ok && !pb->tree.empty()) {
+        std::lock_guard<std::mutex> lk(g_cacheMutex);
+        if (g_cache.size() >= kMaxCache) g_cache.erase(g_cache.begin());
+        g_cache[key] = pb->tree;
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(g_pendingMutex);
+        g_pending.erase(key);
+    }
+}
+
+std::shared_ptr<PendingBuild> PendingFor(const std::wstring& key) {
+    std::lock_guard<std::mutex> lk(g_pendingMutex);
+    auto it = g_pending.find(key);
+    if (it != g_pending.end()) return it->second;
+    auto pb = std::make_shared<PendingBuild>();
+    g_pending[key] = pb;
+    return pb;
+}
+
+void EnsureBuild(const std::vector<std::wstring>& paths, const std::wstring& key,
+                 const std::shared_ptr<PendingBuild>& pb) {
+    {
+        std::lock_guard<std::mutex> lk(pb->m);
+        if (pb->started) return;
+        pb->started = true;
+    }
+    // Detached: the surrogate never unloads the DLL (DllCanUnloadNow returns
+    // S_FALSE) and process teardown is the only reason these threads end.
+    std::thread([paths, key, pb]() { RunAsyncBuild(paths, key, pb); }).detach();
+}
+
 } // namespace
+
+void StartSnapshotWarmup(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) return;
+
+    const std::wstring key = CacheKey(paths);
+    {
+        std::lock_guard<std::mutex> lk(g_cacheMutex);
+        if (g_cache.find(key) != g_cache.end()) return;
+    }
+
+    const auto pb = PendingFor(key);
+    EnsureBuild(paths, key, pb);
+}
+
+bool TryGetSnapshot(const std::vector<std::wstring>& paths, DWORD waitMs,
+                    std::vector<LegacyMenuItem>& out) {
+    out.clear();
+    if (paths.empty()) return true;
+
+    const std::wstring key = CacheKey(paths);
+    {
+        std::lock_guard<std::mutex> lk(g_cacheMutex);
+        auto it = g_cache.find(key);
+        if (it != g_cache.end()) {
+            out = it->second;
+            return true;
+        }
+    }
+
+    const auto pb = PendingFor(key);
+    EnsureBuild(paths, key, pb);
+
+    std::unique_lock<std::mutex> lk(pb->m);
+    if (pb->done) {
+        out = pb->tree;
+        return true;
+    }
+    pb->cv.wait_for(lk, std::chrono::milliseconds(waitMs));
+    if (pb->done) {
+        out = pb->tree;
+        return true;
+    }
+    return false;
+}
 
 std::vector<LegacyMenuItem> GetSnapshot(const std::vector<std::wstring>& paths) {
     std::vector<LegacyMenuItem> none;

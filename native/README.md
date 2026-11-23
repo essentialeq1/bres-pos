@@ -33,10 +33,11 @@ into JSON; this version is a real shell extension.
    Copy/Cut/Delete/Properties/Pin to Start work), otherwise by command id
    (matched by offset, then by title).
 
-The first use is slow (~1-2s) because legacy handler DLLs are cold. The worker
-process then stays resident (`--serve`), keeping those handler DLLs warm, and
-the snapshot is cached per selection — so later menus open almost instantly and
-the other modern extensions are no longer held up.
+Menu enumeration never waits on that build: the snapshot is built on a
+background thread (started as soon as the selection is known) and cached per
+selection, so the Windows 11 menu — and every other modern extension — appears
+immediately. If a build is still in flight, the flyout shows a disabled
+"Loading..." entry until the next open.
 
 ## Files
 
@@ -125,8 +126,9 @@ again.
 - Registered for files (`*`) and folders (`Directory`). Drive/background can be
   added in the manifest with `desktop10:ItemType Type="Drive"` /
   `"DesktopBackground"` (Win11 22H2+).
-- First open of a new selection is ~1-2s while legacy handler DLLs load; later
-  opens reuse the warm worker and per-selection cache.
+- A brand-new selection whose snapshot was never cached may show a disabled
+  "Loading..." entry on its first open while the background worker builds the
+  menu; the next open reuses the warm worker and cache and is instant.
 
 ## Notes
 

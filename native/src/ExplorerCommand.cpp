@@ -13,6 +13,11 @@
 namespace legacy {
 namespace {
 
+// Upper bound (ms) on how long EnumSubCommands waits for a background snapshot
+// build before falling back to a "Loading..." placeholder. Keeps the Windows 11
+// menu (and its other extensions) from being held up by a slow legacy-menu build.
+constexpr DWORD kEnumBoundedWaitMs = 200;
+
 HRESULT DuplicateString(const std::wstring& value, LPWSTR* out) {
     if (!out) return E_POINTER;
     *out = nullptr;
@@ -177,8 +182,17 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
     if (paths.empty()) paths = _paths;
 
     std::vector<LegacyMenuItem> nodes;
+    bool ready = true;
     if (_kind == Kind::Root) {
-        if (!paths.empty()) nodes = GetSnapshot(paths);
+        if (!paths.empty()) {
+            // Never build the legacy menu synchronously here: the build was
+            // started in SetSelection/Initialize and runs in the background.
+            // Wait only a short time, then fall back to "Loading...".
+            ready = TryGetSnapshot(paths, kEnumBoundedWaitMs, nodes);
+            if (!ready) nodes.clear();
+        } else {
+            nodes.clear();
+        }
     } else {
         nodes = _children;   // SubMenu: its own nested children
     }
@@ -194,9 +208,21 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
         }
     }
 
-    // Safety net: a flyout with zero items loses its expand arrow in the
-    // modern menu. Keep one disabled placeholder so the entry stays usable.
-    if (commands.empty()) {
+    if (!ready) {
+        // The background build is still running. Keep a disabled "Loading..."
+        // item so the flyout keeps its expand arrow; the real items are cached
+        // and returned on the next menu open.
+        LegacyMenuItem placeholder;
+        placeholder.title = L"Loading...";
+        Microsoft::WRL::ComPtr<IExplorerCommand> cmd;
+        if (SUCCEEDED(Create(Kind::Item, _selection, paths, placeholder,
+                             IID_IExplorerCommand, (void**)cmd.GetAddressOf())) && cmd) {
+            static_cast<CLegacyCommand*>(cmd.Get())->_disabled = true;
+            commands.push_back(cmd);
+        }
+    } else if (commands.empty()) {
+        // Safety net: a flyout with zero items loses its expand arrow in the
+        // modern menu. Keep one disabled placeholder so the entry stays usable.
         LegacyMenuItem placeholder;
         placeholder.title = L"No classic items found";
         Microsoft::WRL::ComPtr<IExplorerCommand> cmd;
@@ -233,7 +259,10 @@ STDMETHODIMP CLegacyCommand::SetSelection(IShellItemArray* psia) {
     _selection = psia;
     if (psia) {
         std::vector<std::wstring> paths;
-        if (SUCCEEDED(ExtractPaths(psia, paths)) && !paths.empty()) _paths = paths;
+        if (SUCCEEDED(ExtractPaths(psia, paths)) && !paths.empty()) {
+            _paths = paths;
+            if (_kind == Kind::Root) StartSnapshotWarmup(_paths);
+        }
     }
     return S_OK;
 }
@@ -249,7 +278,16 @@ STDMETHODIMP CLegacyCommand::Initialize(PCIDLIST_ABSOLUTE, IDataObject* pdtobj, 
     Microsoft::WRL::ComPtr<IShellItemArray> array;
     HRESULT hr = SHCreateShellItemArrayFromDataObject(pdtobj, IID_IShellItemArray,
                                                       (void**)array.GetAddressOf());
-    if (SUCCEEDED(hr) && array) _selection = array;
+    if (SUCCEEDED(hr) && array) {
+        _selection = array;
+        if (_kind == Kind::Root) {
+            std::vector<std::wstring> paths;
+            if (SUCCEEDED(ExtractPaths(_selection.Get(), paths)) && !paths.empty()) {
+                _paths = paths;
+                StartSnapshotWarmup(_paths);
+            }
+        }
+    }
     return S_OK;
 }
 
