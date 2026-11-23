@@ -24,6 +24,12 @@ bool TryGetSnapshot(const std::vector<std::wstring>& paths,
                     DWORD waitMs,
                     std::vector<LegacyMenuItem>& out);
 
+// Non-blocking "is it ready yet?" probe used by GetState to decide between
+// reporting E_PENDING (still building) and ECS_ENABLED without ever blocking
+// the menu thread. Returns true when the snapshot for `paths` is already
+// cached or the background build has already completed.
+bool IsSnapshotReady(const std::vector<std::wstring>& paths);
+
 // Invokes a legacy item. Prefers the canonical verb when it is non-empty,
 // otherwise falls back to command-offset invocation inside the worker.
 // Returns HRESULT_FROM_WIN32(ERROR_NOT_FOUND) when the menu changed order.

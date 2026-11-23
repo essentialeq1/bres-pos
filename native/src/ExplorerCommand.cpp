@@ -13,10 +13,15 @@
 namespace legacy {
 namespace {
 
-// Upper bound (ms) on how long EnumSubCommands waits for a background snapshot
-// build before falling back to a "Loading..." placeholder. Keeps the Windows 11
-// menu (and its other extensions) from being held up by a slow legacy-menu build.
+// Upper bound (ms) on how long EnumSubCommands waits on its first, non-blocking
+// pass for a background snapshot build. Keeps the Windows 11 menu (and its
+// other extensions) from being held up by a slow legacy-menu build.
 constexpr DWORD kEnumBoundedWaitMs = 200;
+
+// Worst-case budget (ms) for the synchronous fallback. Covers the worker's
+// 8s + 15s enumeration timeouts with margin, so a cold first open still returns
+// the real items instead of a stuck "Loading..." entry.
+constexpr DWORD kEnumFallbackWaitMs = 30000;
 
 HRESULT DuplicateString(const std::wstring& value, LPWSTR* out) {
     if (!out) return E_POINTER;
@@ -157,11 +162,33 @@ STDMETHODIMP CLegacyCommand::GetCanonicalName(GUID* pguidCommandName) {
     return S_OK;
 }
 
-STDMETHODIMP CLegacyCommand::GetState(IShellItemArray* psiItemArray, BOOL, EXPCMDSTATE* pCmdState) {
+STDMETHODIMP CLegacyCommand::GetState(IShellItemArray* psiItemArray, BOOL fOkToBeSlow, EXPCMDSTATE* pCmdState) {
     Log(L"GetState(%s)", KindStr(_kind));
     if (!pCmdState) return E_POINTER;
     if (!_selection && psiItemArray) _selection = psiItemArray;
-    *pCmdState = _disabled ? ECS_DISABLED : ECS_ENABLED;
+    if (_disabled) { *pCmdState = ECS_DISABLED; return S_OK; }
+
+    if (_kind == Kind::Root) {
+        // Resolve the current selection and make sure the background snapshot
+        // build has been started (some shells call GetState before SetSelection).
+        std::vector<std::wstring> paths;
+        if (_selection) ExtractPaths(_selection.Get(), paths);
+        if (paths.empty()) paths = _paths;
+
+        if (!paths.empty()) {
+            StartSnapshotWarmup(paths);
+            if (!IsSnapshotReady(paths)) {
+                if (!fOkToBeSlow)
+                    return E_PENDING;   // native "still building" signal
+                // Slow pass: it is OK to block here, so wait for the in-flight
+                // build to finish and then report the real state.
+                std::vector<LegacyMenuItem> nodes;
+                TryGetSnapshot(paths, kEnumFallbackWaitMs, nodes);
+            }
+        }
+    }
+
+    *pCmdState = ECS_ENABLED;
     return S_OK;
 }
 
@@ -185,11 +212,15 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
     bool ready = true;
     if (_kind == Kind::Root) {
         if (!paths.empty()) {
-            // Never build the legacy menu synchronously here: the build was
-            // started in SetSelection/Initialize and runs in the background.
-            // Wait only a short time, then fall back to "Loading...".
+            // First, a quick non-blocking hit on the background build that was
+            // started earlier in SetSelection/Initialize/GetState.
             ready = TryGetSnapshot(paths, kEnumBoundedWaitMs, nodes);
-            if (!ready) nodes.clear();
+            if (!ready) {
+                // Still building: wait for the in-flight build to finish so the
+                // real items always appear. TryGetSnapshot reuses the already
+                // running build (no duplicate worker round-trip).
+                ready = TryGetSnapshot(paths, kEnumFallbackWaitMs, nodes);
+            }
         } else {
             nodes.clear();
         }
@@ -209,9 +240,9 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
     }
 
     if (!ready) {
-        // The background build is still running. Keep a disabled "Loading..."
-        // item so the flyout keeps its expand arrow; the real items are cached
-        // and returned on the next menu open.
+        // Last resort: the build still has not completed even after the bounded
+        // fallback (e.g. a hung legacy handler). Keep a disabled "Loading..."
+        // item so the flyout keeps its expand arrow.
         LegacyMenuItem placeholder;
         placeholder.title = L"Loading...";
         Microsoft::WRL::ComPtr<IExplorerCommand> cmd;

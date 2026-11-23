@@ -36,8 +36,10 @@ into JSON; this version is a real shell extension.
 Menu enumeration never waits on that build: the snapshot is built on a
 background thread (started as soon as the selection is known) and cached per
 selection, so the Windows 11 menu — and every other modern extension — appears
-immediately. If a build is still in flight, the flyout shows a disabled
-"Loading..." entry until the next open.
+immediately. While the build is still in flight, `GetState` reports `E_PENDING`
+so the menu shows its native "loading" affordance (no fake disabled item); once
+ready, `EnumSubCommands` returns the real items, waiting (bounded) for the
+in-flight build to finish on the first cold open.
 
 ## Files
 
@@ -126,9 +128,10 @@ again.
 - Registered for files (`*`) and folders (`Directory`). Drive/background can be
   added in the manifest with `desktop10:ItemType Type="Drive"` /
   `"DesktopBackground"` (Win11 22H2+).
-- A brand-new selection whose snapshot was never cached may show a disabled
-  "Loading..." entry on its first open while the background worker builds the
-  menu; the next open reuses the warm worker and cache and is instant.
+- A brand-new selection whose snapshot was never cached reports the native
+  loading state (`E_PENDING`) on its first open while the background worker
+  builds the menu; once cached (warm worker + per-selection cache), later opens
+  are instant.
 
 ## Notes
 

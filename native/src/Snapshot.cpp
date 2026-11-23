@@ -398,11 +398,17 @@ void RunAsyncBuild(const std::vector<std::wstring>& paths, const std::wstring& k
     pb->cv.notify_all();
 
     // Publish a successful result to the shared cache so the next open is a
-    // pure cache hit (no worker round-trip).
-    if (ok && !pb->tree.empty()) {
+    // pure cache hit (no worker round-trip). Copy the tree out under the build
+    // lock so no reader can observe it mid-publish.
+    std::vector<LegacyMenuItem> published;
+    {
+        std::lock_guard<std::mutex> lk(pb->m);
+        if (ok && !pb->tree.empty()) published = pb->tree;
+    }
+    if (!published.empty()) {
         std::lock_guard<std::mutex> lk(g_cacheMutex);
         if (g_cache.size() >= kMaxCache) g_cache.erase(g_cache.begin());
-        g_cache[key] = pb->tree;
+        g_cache[key] = std::move(published);
     }
 
     {
@@ -474,6 +480,28 @@ bool TryGetSnapshot(const std::vector<std::wstring>& paths, DWORD waitMs,
     if (pb->done) {
         out = pb->tree;
         return true;
+    }
+    return false;
+}
+
+bool IsSnapshotReady(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) return true;
+
+    const std::wstring key = CacheKey(paths);
+    {
+        std::lock_guard<std::mutex> lk(g_cacheMutex);
+        if (g_cache.find(key) != g_cache.end()) return true;
+    }
+
+    std::shared_ptr<PendingBuild> pb;
+    {
+        std::lock_guard<std::mutex> lk(g_pendingMutex);
+        auto it = g_pending.find(key);
+        if (it != g_pending.end()) pb = it->second;
+    }
+    if (pb) {
+        std::lock_guard<std::mutex> lk(pb->m);
+        return pb->done;
     }
     return false;
 }
