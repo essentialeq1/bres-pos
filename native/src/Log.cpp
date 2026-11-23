@@ -39,6 +39,48 @@ void SetLogComponent(const wchar_t* name) {
     ReleaseSRWLockExclusive(&g_lock);
 }
 
+bool TimingEnabled() {
+    static bool done = false;
+    static bool on = false;
+    if (!done) {
+        done = true;
+        wchar_t v[8] = { 0 };
+        const DWORD n = GetEnvironmentVariableW(L"LEGACYBRIDGE_TIMING", v, _countof(v));
+        on = (n > 0 && v[0] != L'0');
+    }
+    return on;
+}
+
+void TimingLog(const wchar_t* fmt, ...) {
+    if (!TimingEnabled()) return;
+    if (!fmt) return;
+    wchar_t body[2048];
+    va_list args;
+    va_start(args, fmt);
+    _vsnwprintf_s(body, _countof(body), _TRUNCATE, fmt, args);
+    va_end(args);
+    Log(L"[timing] %s", body);
+}
+
+ScopedTimer::ScopedTimer(const wchar_t* name)
+    : _name(name), _start(0), _active(TimingEnabled()) {
+    if (_active) {
+        _start = GetTickCount64();
+        TimingLog(L"%s: begin", _name);
+    }
+}
+
+ScopedTimer::~ScopedTimer() {
+    Stop();
+}
+
+void ScopedTimer::Stop() {
+    if (!_active) return;
+    _active = false;
+    const unsigned long long ms = GetTickCount64() - _start;
+    TimingLog(L"%s: %llu ms", _name, ms);
+}
+
 void Log(const wchar_t* fmt, ...) {
     if (!fmt) return;
 

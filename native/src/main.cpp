@@ -110,6 +110,7 @@ static void SerializeTree(const std::vector<LegacyMenuItem>& items, int depth,
         out += std::to_string(it.offset); out.push_back('\x1F');
         out += WideToUtf8(it.verb);    out.push_back('\x1F');
         out += WideToUtf8(it.icon);    out.push_back('\x1F');
+        out += WideToUtf8(it.iconSource); out.push_back('\x1F');
         out += WideToUtf8(it.title);   out.push_back('\n');
         SerializeTree(it.children, depth + 1, out);
     }
@@ -122,6 +123,7 @@ static void DumpTree(const std::vector<LegacyMenuItem>& items, int depth) {
         line += L"  [offset=" + std::to_wstring(it.offset);
         if (!it.verb.empty()) line += L", verb=" + it.verb;
         if (!it.icon.empty()) line += L", icon=" + it.icon;
+        if (!it.iconSource.empty()) line += L", src=" + it.iconSource;
         line += L"]";
         PrintLine(line);
         DumpTree(it.children, depth + 1);
@@ -149,8 +151,11 @@ static std::string HandleRequest(const std::string& req) {
         const bool hide = (parts[1] == "1");
         std::vector<std::wstring> paths;
         for (size_t i = 2; i < parts.size(); ++i) paths.push_back(Utf8ToWide(parts[i]));
+        TimingLog(L"worker: request received ENUM (%zu path(s))", paths.size());
         std::vector<LegacyMenuItem> items;
+        ScopedTimer timer(L"worker: BuildSnapshot");
         const HRESULT hr = BuildSnapshot(paths, hide, items);
+        timer.Stop();
         if (FAILED(hr)) return "ERR " + HexA(hr);
         std::string out = "OK\n";
         SerializeTree(items, 0, out);
@@ -164,7 +169,10 @@ static std::string HandleRequest(const std::string& req) {
         const std::wstring title = Utf8ToWide(parts[3]);
         std::vector<std::wstring> paths;
         for (size_t i = 4; i < parts.size(); ++i) paths.push_back(Utf8ToWide(parts[i]));
+        TimingLog(L"worker: request received INVOKE verb=%s", verb.c_str());
+        ScopedTimer timer(L"worker: Invoke");
         const HRESULT hr = Invoke(paths, offset, verb, title);
+        timer.Stop();
         if (hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) return "NOTFOUND";
         if (FAILED(hr)) return "ERR " + HexA(hr);
         return "OK";

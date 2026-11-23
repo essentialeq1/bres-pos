@@ -259,18 +259,22 @@ std::wstring ShieldIconLocation() {
 
 std::wstring ResolveItemIcon(IContextMenu* ctx, UINT offset,
                              const std::wstring& verb,
-                             const std::wstring& firstPath) {
+                             const std::wstring& firstPath,
+                             std::wstring& source) {
     std::wstring icon =
         NormalizeIconLocation(GetCommandStringText(ctx, offset, GCS_VERBICONW));
-    if (!icon.empty()) return icon;
+    if (!icon.empty()) { source = L"verb"; return icon; }
 
     icon = ResolveVerbIconFromRegistry(verb, firstPath);
-    if (!icon.empty()) return icon;
+    if (!icon.empty()) { source = L"registry"; return icon; }
 
     // Elevated verbs ("run as administrator", "take ownership") draw the same
     // UAC shield; synthesize it when nothing else provided an icon.
-    if (EqualsI(verb, L"runas") || EqualsI(verb, L"runasuser"))
+    if (EqualsI(verb, L"runas") || EqualsI(verb, L"runasuser")) {
+        source = L"runas";
         return ShieldIconLocation();
+    }
+    source = L"none";
     return L"";
 }
 
@@ -329,7 +333,11 @@ void WalkMenu(MergedMenu& merged, HMENU menu, int depth, bool hideShell,
         node.title = text;
         node.verb = verb;
         node.offset = offset;
-        if (inRange) node.icon = ResolveItemIcon(merged.ctx.Get(), offset, verb, firstPath);
+        if (inRange) {
+            std::wstring source = L"none";
+            node.icon = ResolveItemIcon(merged.ctx.Get(), offset, verb, firstPath, source);
+            node.iconSource = source;
+        }
         out.push_back(std::move(node));
     }
 }

@@ -159,6 +159,7 @@ STDMETHODIMP CLegacyCommand::GetCanonicalName(GUID* pguidCommandName) {
 }
 
 STDMETHODIMP CLegacyCommand::GetState(IShellItemArray* psiItemArray, BOOL fOkToBeSlow, EXPCMDSTATE* pCmdState) {
+    ScopedTimer timer(L"menu: GetState");
     Log(L"GetState(%s)", KindStr(_kind));
     if (!pCmdState) return E_POINTER;
     if (!_selection && psiItemArray) _selection = psiItemArray;
@@ -196,6 +197,7 @@ STDMETHODIMP CLegacyCommand::GetFlags(EXPCMDFLAGS* pFlags) {
 }
 
 STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
+    ScopedTimer timer(L"menu: EnumSubCommands");
     if (!ppEnum) return E_POINTER;
     *ppEnum = nullptr;
     if (_kind == Kind::Item) return E_NOTIMPL;
@@ -260,6 +262,7 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
 }
 
 STDMETHODIMP CLegacyCommand::Invoke(IShellItemArray* psiItemArray, IBindCtx*) {
+    ScopedTimer timer(L"menu: Invoke");
     if (_kind != Kind::Item) return S_OK;
 
     std::vector<std::wstring> paths;
@@ -279,6 +282,7 @@ STDMETHODIMP CLegacyCommand::Invoke(IShellItemArray* psiItemArray, IBindCtx*) {
 }
 
 STDMETHODIMP CLegacyCommand::SetSelection(IShellItemArray* psia) {
+    ScopedTimer timer(L"menu: SetSelection");
     _selection = psia;
     if (psia) {
         std::vector<std::wstring> paths;
@@ -297,6 +301,7 @@ STDMETHODIMP CLegacyCommand::GetSelection(REFIID riid, void** ppv) {
 }
 
 STDMETHODIMP CLegacyCommand::Initialize(PCIDLIST_ABSOLUTE, IDataObject* pdtobj, HKEY) {
+    ScopedTimer timer(L"menu: Initialize");
     if (!pdtobj) return E_INVALIDARG;
     Microsoft::WRL::ComPtr<IShellItemArray> array;
     HRESULT hr = SHCreateShellItemArrayFromDataObject(pdtobj, IID_IShellItemArray,

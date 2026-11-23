@@ -140,6 +140,7 @@ struct WorkerClient {
 
     bool Start(const wchar_t* mode) {
         Stop(true);
+        ScopedTimer startTimer(L"worker: start process");
 
         std::wstring exe = WorkerExePath();
         if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -206,6 +207,7 @@ std::mutex g_workerMutex;
 bool TransactOneShot(const std::string& req, std::string& resp, DWORD timeoutMs) {
     WorkerClient one;
     if (!one.Start(L"--oneshot")) return false;
+    ScopedTimer timer(L"worker: one-shot transact");
     bool ok = false;
     if (WriteFrame(one.hStdin, req)) {
         // Close stdin so the worker exits after answering.
@@ -222,6 +224,7 @@ bool TransactOneShot(const std::string& req, std::string& resp, DWORD timeoutMs)
 bool Transact(const std::string& req, std::string& resp, DWORD timeoutMs) {
     std::lock_guard<std::mutex> lock(g_workerMutex);
     if (g_worker.EnsureStarted()) {
+        ScopedTimer timer(L"worker: transact");
         if (WriteFrame(g_worker.hStdin, req) && ReadFrame(g_worker.hStdout, resp, timeoutMs))
             return true;
         Log(L"persistent worker transaction failed; falling back to one-shot");
@@ -300,21 +303,22 @@ bool ParseEnumResponse(const std::string& bytes, std::vector<LegacyMenuItem>& ou
 
         std::vector<std::wstring> f;
         size_t start = 0;
-        while (f.size() < 4) {
+        while (f.size() < 5) {
             size_t sep = line.find(kFieldSep, start);
             if (sep == std::wstring::npos) break;
             f.push_back(line.substr(start, sep - start));
             start = sep + 1;
         }
         f.push_back(line.substr(start)); // title is always the remainder
-        if (f.size() < 5) continue;
+        if (f.size() < 6) continue;
 
         FlatRec rec;
         rec.depth = _wtoi(f[0].c_str());
         rec.item.offset = (UINT)wcstoul(f[1].c_str(), nullptr, 10);
         rec.item.verb = f[2];
         rec.item.icon = f[3];
-        rec.item.title = f[4];
+        rec.item.iconSource = f[4];
+        rec.item.title = f[5];
         recs.push_back(std::move(rec));
     }
 
@@ -386,6 +390,7 @@ std::map<std::wstring, std::shared_ptr<PendingBuild>> g_pending;
 
 void RunAsyncBuild(const std::vector<std::wstring>& paths, const std::wstring& key,
                    const std::shared_ptr<PendingBuild>& pb) {
+    ScopedTimer timer(L"worker: async build");
     std::vector<LegacyMenuItem> tree;
     const bool ok = RunEnumeration(paths, HideShellDefault(), tree);
 
@@ -463,10 +468,12 @@ bool TryGetSnapshot(const std::vector<std::wstring>& paths, DWORD waitMs,
         std::lock_guard<std::mutex> lk(g_cacheMutex);
         auto it = g_cache.find(key);
         if (it != g_cache.end()) {
+            TimingLog(L"cache hit: %s", paths[0].c_str());
             out = it->second;
             return true;
         }
     }
+    TimingLog(L"cache miss: %s", paths[0].c_str());
 
     const auto pb = PendingFor(key);
     EnsureBuild(paths, key, pb);
@@ -514,8 +521,12 @@ std::vector<LegacyMenuItem> GetSnapshot(const std::vector<std::wstring>& paths) 
     {
         std::lock_guard<std::mutex> lk(g_cacheMutex);
         auto it = g_cache.find(key);
-        if (it != g_cache.end()) return it->second;
+        if (it != g_cache.end()) {
+            TimingLog(L"cache hit: %s", paths[0].c_str());
+            return it->second;
+        }
     }
+    TimingLog(L"cache miss: %s", paths[0].c_str());
 
     // Serialize builds and re-check so concurrent calls for the same
     // selection never spawn duplicate work.

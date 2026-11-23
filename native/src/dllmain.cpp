@@ -65,6 +65,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         GetModuleFileNameW(nullptr, host, MAX_PATH);
         legacy::Log(L"host process: %s", host);
         legacy::Log(L"dll attached");
+        legacy::TimingLog(L"DLL_PROCESS_ATTACH host=%s", host);
     }
     return TRUE;
 }

@@ -12,7 +12,8 @@ namespace legacy {
 struct LegacyMenuItem {
     std::wstring title;   // display text
     std::wstring verb;    // canonical verb (GCS_VERBW) when the handler exposes one
-    std::wstring icon;    // "path,index" icon location (GCS_VERBICONW) when known
+    std::wstring icon;    // icon location: "path,index" (verb/registry) or ".ico" path (bitmap)
+    std::wstring iconSource; // provenance of `icon`: "verb" | "registry" | "runas" | "bitmap" | "none"
     UINT         offset = 0; // command id relative to idCmdFirst (for id invocation)
     std::vector<LegacyMenuItem> children; // non-empty => submenu
 
