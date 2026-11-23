@@ -13,15 +13,11 @@
 namespace legacy {
 namespace {
 
-// Upper bound (ms) on how long EnumSubCommands waits on its first, non-blocking
-// pass for a background snapshot build. Keeps the Windows 11 menu (and its
-// other extensions) from being held up by a slow legacy-menu build.
+// Upper bound (ms) on how long EnumSubCommands waits for a background snapshot
+// build. Keeps the Windows 11 menu (and its other extensions) from being held
+// up by a slow legacy-menu build; when it expires we show a "Loading..." item
+// instead of blocking, and the completed snapshot is served from cache.
 constexpr DWORD kEnumBoundedWaitMs = 200;
-
-// Worst-case budget (ms) for the synchronous fallback. Covers the worker's
-// 8s + 15s enumeration timeouts with margin, so a cold first open still returns
-// the real items instead of a stuck "Loading..." entry.
-constexpr DWORD kEnumFallbackWaitMs = 30000;
 
 HRESULT DuplicateString(const std::wstring& value, LPWSTR* out) {
     if (!out) return E_POINTER;
@@ -177,14 +173,14 @@ STDMETHODIMP CLegacyCommand::GetState(IShellItemArray* psiItemArray, BOOL fOkToB
 
         if (!paths.empty()) {
             StartSnapshotWarmup(paths);
-            if (!IsSnapshotReady(paths)) {
-                if (!fOkToBeSlow)
-                    return E_PENDING;   // native "still building" signal
-                // Slow pass: it is OK to block here, so wait for the in-flight
-                // build to finish and then report the real state.
-                std::vector<LegacyMenuItem> nodes;
-                TryGetSnapshot(paths, kEnumFallbackWaitMs, nodes);
-            }
+            // Fast pass: signal "still building" so the shell defers us instead
+            // of blocking, and every other extension appears immediately.
+            if (!IsSnapshotReady(paths) && !fOkToBeSlow)
+                return E_PENDING;
+            // Slow pass must return a definitive state. Never block the shared
+            // menu thread on the background build here: if it is still in
+            // flight, EnumSubCommands shows a transient "Loading..." item and
+            // the cached snapshot makes the next open instant.
         }
     }
 
@@ -212,15 +208,11 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
     bool ready = true;
     if (_kind == Kind::Root) {
         if (!paths.empty()) {
-            // First, a quick non-blocking hit on the background build that was
-            // started earlier in SetSelection/Initialize/GetState.
+            // Quick bounded wait on the background build started earlier in
+            // SetSelection/Initialize/GetState. If it has not finished yet we
+            // fall back to a "Loading..." item rather than blocking the menu
+            // (which would hold up every other extension).
             ready = TryGetSnapshot(paths, kEnumBoundedWaitMs, nodes);
-            if (!ready) {
-                // Still building: wait for the in-flight build to finish so the
-                // real items always appear. TryGetSnapshot reuses the already
-                // running build (no duplicate worker round-trip).
-                ready = TryGetSnapshot(paths, kEnumFallbackWaitMs, nodes);
-            }
         } else {
             nodes.clear();
         }

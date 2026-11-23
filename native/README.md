@@ -38,8 +38,9 @@ background thread (started as soon as the selection is known) and cached per
 selection, so the Windows 11 menu — and every other modern extension — appears
 immediately. While the build is still in flight, `GetState` reports `E_PENDING`
 so the menu shows its native "loading" affordance (no fake disabled item); once
-ready, `EnumSubCommands` returns the real items, waiting (bounded) for the
-in-flight build to finish on the first cold open.
+ready (typically within a moment, from the cache), `EnumSubCommands` returns the
+real items. `GetState` and `EnumSubCommands` never block the menu thread for
+more than ~200 ms.
 
 ## Files
 
@@ -131,7 +132,9 @@ again.
 - A brand-new selection whose snapshot was never cached reports the native
   loading state (`E_PENDING`) on its first open while the background worker
   builds the menu; once cached (warm worker + per-selection cache), later opens
-  are instant.
+  are instant. The menu thread is never blocked for more than ~200 ms, so other
+  extensions load in parallel; only a hung legacy handler shows a transient
+  `Loading...` item until the next open.
 
 ## Notes
 
