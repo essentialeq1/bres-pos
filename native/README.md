@@ -122,10 +122,13 @@ again.
 - Handlers that only create owner-draw (`MFT_OWNERDRAW`) items whose text is not
   available via `GetCommandString` may be listed with a fallback verb name or
   skipped.
-- Per-item icons come first from `GCS_VERBICONW` (normalized to an absolute,
-  quoted `"path",index`), then from the verb's registry `Icon` value, then — for
-  elevated `runas`/`runasuser` verbs — the UAC shield (`imageres.dll,-78`).
-  Items with none of those fall back to the module icon.
+- Per-item icons resolve in this order: (1) the bitmap the handler attaches to
+  the item (`MENUITEMINFO hbmpItem`), converted to a cached `.ico`; (2) the verb
+  icon string (`GCS_VERBICONW`, normalized to an absolute quoted `"path",index`);
+  (3) the verb's registry `Icon` value; (4) the UAC shield (`imageres.dll,-78`)
+  only when the verb is literally `runas`. Items that resolve nothing show no
+  icon. Owner-draw/callback bitmaps (`IContextMenu2/3` draw messages) are not
+  used, because forwarding draw messages risks crashing a legacy handler.
 - Registered for files (`*`) and folders (`Directory`). Drive/background can be
   added in the manifest with `desktop10:ItemType Type="Drive"` /
   `"DesktopBackground"` (Win11 22H2+).
@@ -144,3 +147,7 @@ again.
 - The process must stay resident between enumeration and invoke to keep legacy
   handler DLLs warm; the COM server is registered with a surrogate and
   `DllCanUnloadNow` returns `S_FALSE`.
+- Resolved item bitmaps are cached as `.ico` files under
+  `%LOCALAPPDATA%\bres-pos\icons` (named by a hash of file type + verb + title,
+  so unchanged icons are reused and never rewritten). To clear the cache and
+  force fresh icons, delete that folder — Explorer rebuilds it on demand.

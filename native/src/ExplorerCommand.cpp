@@ -129,12 +129,15 @@ STDMETHODIMP CLegacyCommand::GetIcon(IShellItemArray* psiItemArray, LPWSTR* ppsz
     if (!_selection && psiItemArray) _selection = psiItemArray;
     *ppszIcon = nullptr;
 
-    // Per-item icon location (from GCS_VERBICONW) when we captured one.
-    if (_kind == Kind::Item && !_icon.empty())
+    // Items carry their own resolved icon (a cached ".ico" path, or an absolute
+    // "path,index"). When the worker resolved none we intentionally show no icon
+    // for the item: a missing icon is better than a wrong one (e.g. a UAC shield
+    // on a non-elevated Acrobat / "Take ownership" item).
+    if (_kind == Kind::Item)
         return DuplicateString(_icon, ppszIcon);
 
-    // The module icon doubles as the root icon and the fallback for items
-    // without an icon. Never return S_FALSE here: the XAML menu crashes on it.
+    // The module icon doubles as the root and submenu icon. Never return S_FALSE
+    // here: the XAML menu crashes on it.
     if (g_hInst) {
         wchar_t path[MAX_PATH] = { 0 };
         if (GetModuleFileNameW(g_hInst, path, MAX_PATH)) {

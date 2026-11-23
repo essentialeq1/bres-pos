@@ -1,5 +1,6 @@
 #include "Common.h"
 #include "LegacyEnumerator.h"
+#include "IconCache.h"
 #include "Log.h"
 
 #include <shlobj.h>
@@ -356,23 +357,68 @@ std::wstring ShieldIconLocation() {
     return std::wstring(sys) + L"\\imageres.dll,-78";
 }
 
+// Detects a resolved icon that is the UAC shield. Only the literal "runas" verb
+// may legitimately show it, so verb/registry icons that turn out to be the
+// shield are suppressed for everything else (fixes the "wrong shield" symptom).
+bool IsShieldIcon(const std::wstring& location) {
+    if (location.empty()) return false;
+    std::wstring s = TrimWide(location);
+    if (s.size() >= 2 && s.front() == L'"' && s.back() == L'"')
+        s = s.substr(1, s.size() - 2);
+    const std::wstring shield = ShieldIconLocation();
+    return !shield.empty() && LowerWide(s) == LowerWide(shield);
+}
+
+// Stable per-item identity for the icon cache. The merged IContextMenu does not
+// expose the owning handler's CLSID, so (file type + verb + normalized title) is
+// used instead — it uniquely identifies the icon for a given item and is stable
+// across runs, which is what the cache needs for reuse.
+std::wstring IconCacheKey(const std::wstring& firstPath,
+                          const std::wstring& verb,
+                          const std::wstring& title) {
+    std::wstring type;
+    const size_t dot = firstPath.find_last_of(L'.');
+    const size_t slash = firstPath.find_last_of(L"\\/");
+    if (dot != std::wstring::npos && (slash == std::wstring::npos || dot > slash))
+        type = LowerWide(firstPath.substr(dot));
+    if (type.empty()) type = L"(item)";
+    return type + L'\x1F' + LowerWide(TrimWide(verb)) + L'\x1F' + NormalizeTitle(title);
+}
+
 std::wstring ResolveItemIcon(IContextMenu* ctx, UINT offset,
                              const std::wstring& verb,
                              const std::wstring& firstPath,
+                             const std::wstring& title,
+                             HBITMAP hbmp,
                              std::wstring& source) {
+    // 1) A real handler-attached bitmap (MENUITEMINFO hbmpItem) is the most
+    //    faithful icon; convert it to a cached .ico file.
+    if (hbmp) {
+        std::wstring ico = CacheBitmapIcon(hbmp, IconCacheKey(firstPath, verb, title));
+        if (!ico.empty()) { source = L"bitmap"; return ico; }
+    }
+
+    // 2) The verb's own icon string (GCS_VERBICONW).
     std::wstring icon =
         NormalizeIconLocation(GetCommandStringText(ctx, offset, GCS_VERBICONW));
-    if (!icon.empty()) { source = L"verb"; return icon; }
+    if (!icon.empty() && (EqualsI(verb, L"runas") || !IsShieldIcon(icon))) {
+        source = L"verb";
+        return icon;
+    }
 
+    // 3) The verb's registry "Icon" value.
     icon = ResolveVerbIconFromRegistry(verb, firstPath);
-    if (!icon.empty()) { source = L"registry"; return icon; }
+    if (!icon.empty() && (EqualsI(verb, L"runas") || !IsShieldIcon(icon))) {
+        source = L"registry";
+        return icon;
+    }
 
-    // Elevated verbs ("run as administrator", "take ownership") draw the same
-    // UAC shield; synthesize it when nothing else provided an icon.
-    if (EqualsI(verb, L"runas") || EqualsI(verb, L"runasuser")) {
+    // 4) The synthesized UAC shield, only for the literal "runas" verb.
+    if (EqualsI(verb, L"runas")) {
         source = L"runas";
         return ShieldIconLocation();
     }
+
     source = L"none";
     return L"";
 }
@@ -388,7 +434,7 @@ void WalkMenu(MergedMenu& merged, HMENU menu, int depth, bool hideShell,
     for (int i = 0; i < count; ++i) {
         MENUITEMINFOW mii = { 0 };
         mii.cbSize = sizeof(mii);
-        mii.fMask = MIIM_FTYPE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING;
+        mii.fMask = MIIM_FTYPE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING | MIIM_BITMAP;
         wchar_t buf[1024] = { 0 };
         mii.dwTypeData = buf;
         mii.cch = _countof(buf);
@@ -434,7 +480,7 @@ void WalkMenu(MergedMenu& merged, HMENU menu, int depth, bool hideShell,
         node.offset = offset;
         if (inRange) {
             std::wstring source = L"none";
-            node.icon = ResolveItemIcon(merged.ctx.Get(), offset, verb, firstPath, source);
+            node.icon = ResolveItemIcon(merged.ctx.Get(), offset, verb, firstPath, text, mii.hbmpItem, source);
             node.iconSource = source;
         }
         out.push_back(std::move(node));
