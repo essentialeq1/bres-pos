@@ -13,12 +13,6 @@
 namespace legacy {
 namespace {
 
-// Upper bound (ms) on how long EnumSubCommands waits for a background snapshot
-// build. Keeps the Windows 11 menu (and its other extensions) from being held
-// up by a slow legacy-menu build; when it expires we show a "Loading..." item
-// instead of blocking, and the completed snapshot is served from cache.
-constexpr DWORD kEnumBoundedWaitMs = 200;
-
 HRESULT DuplicateString(const std::wstring& value, LPWSTR* out) {
     if (!out) return E_POINTER;
     *out = nullptr;
@@ -213,11 +207,11 @@ STDMETHODIMP CLegacyCommand::EnumSubCommands(IEnumExplorerCommand** ppEnum) {
     bool ready = true;
     if (_kind == Kind::Root) {
         if (!paths.empty()) {
-            // Quick bounded wait on the background build started earlier in
-            // SetSelection/Initialize/GetState. If it has not finished yet we
-            // fall back to a "Loading..." item rather than blocking the menu
-            // (which would hold up every other extension).
-            ready = TryGetSnapshot(paths, kEnumBoundedWaitMs, nodes);
+            // Never block the menu thread. A warm cache entry returns instantly
+            // (stale-while-revalidate refreshes expired ones in the background);
+            // a cold selection has no entry yet, so we show a "Loading..." item
+            // and the result is served from cache on the next open.
+            ready = TryGetSnapshot(paths, nodes);
         } else {
             nodes.clear();
         }
@@ -277,7 +271,7 @@ STDMETHODIMP CLegacyCommand::Invoke(IShellItemArray* psiItemArray, IBindCtx*) {
     HRESULT hr = InvokeLegacyItem(paths, _offset, _verb, _title);
     if (hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) {
         MessageBoxW(nullptr,
-            L"The legacy menu order changed.\nPlease re-open the menu and try again.",
+            L"This item is no longer available (the legacy menu changed).\nPlease re-open the menu and try again.",
             L"LegacyMenuBridge", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
         return S_OK;
     }

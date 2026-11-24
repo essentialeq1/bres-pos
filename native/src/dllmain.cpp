@@ -3,6 +3,7 @@
 #include "Guid.h"
 #include "Log.h"
 #include "Module.h"
+#include "Snapshot.h"
 
 #include <new>
 
@@ -38,6 +39,9 @@ public:
 
     STDMETHODIMP CreateInstance(IUnknown* outer, REFIID riid, void** ppv) override {
         if (outer) return CLASS_E_NOAGGREGATION;
+        // Prewarm the worker process (once) so the first right-click isn't cold.
+        // Not done in DllMain: spawning a process there would risk the loader lock.
+        legacy::StartSnapshotWorkerPrewarm();
         legacy::LegacyMenuItem root;
         root.title = L"Classic Menu";
         return legacy::CLegacyCommand::Create(legacy::CLegacyCommand::Kind::Root,

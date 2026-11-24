@@ -5,29 +5,27 @@
 
 namespace legacy {
 
-// Returns the legacy menu tree for the given selection paths.
-// Results are cached per selection, so repeat opens are instant.
-// Returns an empty tree when the menu could not be built.
-std::vector<LegacyMenuItem> GetSnapshot(const std::vector<std::wstring>& paths);
+// Spawns the warm worker process once, off-thread, so the first right-click
+// doesn't pay the CreateProcess + legacy-handler-DLL load cost. Safe to call
+// repeatedly (it is a no-op after the first time).
+void StartSnapshotWorkerPrewarm();
 
-// Starts a background build of the legacy menu for the given selection (no
-// blocking). This is called as soon as the selection is known so that, by the
-// time EnumSubCommands needs the items, they are usually already cached.
+// Starts a background build for the given selection (no blocking), unless a
+// fresh cache entry (within the TTL) already exists. Called as soon as the
+// selection is known so the menu is warm by the next open.
 void StartSnapshotWarmup(const std::vector<std::wstring>& paths);
 
-// Returns the legacy menu tree if it is available within waitMs (either from
-// the cache or from a background build that is already running). Returns true
-// and fills `out` when ready; returns false when the build is still in flight,
-// in which case the caller should show a "Loading..." placeholder and retry on
-// the next menu open.
+// Returns the legacy menu tree immediately when a (possibly stale) cache entry
+// exists for the selection's file type, scheduling a background refresh when it
+// is expired (stale-while-revalidate). Returns false when there is no entry, in
+// which case the caller shows a "Loading..." placeholder and retries on the next
+// menu open. Never blocks the menu thread.
 bool TryGetSnapshot(const std::vector<std::wstring>& paths,
-                    DWORD waitMs,
                     std::vector<LegacyMenuItem>& out);
 
 // Non-blocking "is it ready yet?" probe used by GetState to decide between
-// reporting E_PENDING (still building) and ECS_ENABLED without ever blocking
-// the menu thread. Returns true when the snapshot for `paths` is already
-// cached or the background build has already completed.
+// E_PENDING (cold first open) and ECS_ENABLED without ever blocking the menu
+// thread. Returns true when any cache entry exists for the selection.
 bool IsSnapshotReady(const std::vector<std::wstring>& paths);
 
 // Invokes a legacy item. Prefers the canonical verb when it is non-empty,

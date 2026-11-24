@@ -25,7 +25,7 @@ crashing third-party handler can never take Explorer down.
    + `QueryContextMenu`), reads the nested submenus, verbs and icons, and returns
    them to the modern menu.
 3. Picking an item tells the worker to invoke it by canonical verb (or command
-   id). Snapshots are cached per selection, so repeat menus open instantly.
+   id). Snapshots are cached per file type, so repeat menus open instantly.
 
 Logs: `%TEMP%\LegacyMenuBridgeNative-*.log`
 

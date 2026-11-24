@@ -34,13 +34,14 @@ into JSON; this version is a real shell extension.
    (matched by offset, then by title).
 
 Menu enumeration never waits on that build: the snapshot is built on a
-background thread (started as soon as the selection is known) and cached per
-selection, so the Windows 11 menu — and every other modern extension — appears
-immediately. While the build is still in flight, `GetState` reports `E_PENDING`
-so the menu shows its native "loading" affordance (no fake disabled item); once
-ready (typically within a moment, from the cache), `EnumSubCommands` returns the
-real items. `GetState` and `EnumSubCommands` never block the menu thread for
-more than ~200 ms.
+background thread (started as soon as the selection is known, and the worker
+process is prewarmed when the DLL first loads) and cached by file type, so the
+Windows 11 menu — and every other modern extension — appears immediately. A warm
+cache entry is returned instantly, with expired entries refreshed in the
+background (stale-while-revalidate); a brand-new file type has no entry yet, so
+`EnumSubCommands` shows a transient `Loading...` item and the real items appear
+on the next right-click. `GetState` and `EnumSubCommands` never block the menu
+thread.
 
 ## Files
 
@@ -51,7 +52,8 @@ more than ~200 ms.
 | `src/MenuModel.h` | `LegacyMenuItem` tree (title / verb / icon / children) |
 | `src/Log.h/.cpp` | File + debug logger (`%TEMP%\LegacyMenuBridgeNative-*.log`) |
 | `src/LegacyEnumerator.h/.cpp` | Build/snapshot/re-invoke the classic menu (the core) |
-| `src/Snapshot.h/.cpp` | Persistent worker + framing protocol + per-selection cache |
+| `src/IconCache.h/.cpp` | `hbmpItem` → cached `.ico` (16/32 px, alpha preserved) |
+| `src/Snapshot.h/.cpp` | Persistent worker + framing protocol + file-type cache (SWR) |
 | `src/ExplorerCommand.h/.cpp` | `IExplorerCommand` + `IEnumExplorerCommand` + `IObjectWithSelection` + `IShellExtInit` |
 | `src/EnumExplorerCommand.cpp` | Sub-command enumerator |
 | `src/dllmain.cpp` | `DllGetClassObject`, class factory, exports |
@@ -108,11 +110,13 @@ the real legacy handler.
 
 By default the shell's own duplicate entries (Open, Open with, Send to, Give
 access to, Copy as path, Copy, Cut, Delete, Rename, Properties, Pin to…, Create
-shortcut, Include in library, Troubleshoot compatibility, …) are hidden at the
-top level so the flyout focuses on app options. App-owned submenus (7-Zip,
-Kaspersky, …) and everything inside them are preserved. Set the environment
-variable `LEGACYBRIDGE_SHOW_SHELL=1` (then restart Explorer) to show them all
-again.
+shortcut, Troubleshoot compatibility, …) are hidden at the top level so the
+flyout focuses on app options. App-owned submenus (7-Zip, Kaspersky, …) and
+everything inside them are preserved. This list lives in an editable text file
+`LegacyMenuBridge.blocklist.txt` next to the DLL (one verb or normalized title
+per line, `#` for comments; the built-in default is used if the file is
+missing). Set the environment variable `LEGACYBRIDGE_SHOW_SHELL=1` (then restart
+Explorer) to show all duplicates again.
 
 ## Known limitations (milestone 1)
 
@@ -132,12 +136,13 @@ again.
 - Registered for files (`*`) and folders (`Directory`). Drive/background can be
   added in the manifest with `desktop10:ItemType Type="Drive"` /
   `"DesktopBackground"` (Win11 22H2+).
-- A brand-new selection whose snapshot was never cached reports the native
-  loading state (`E_PENDING`) on its first open while the background worker
-  builds the menu; once cached (warm worker + per-selection cache), later opens
-  are instant. The menu thread is never blocked for more than ~200 ms, so other
-  extensions load in parallel; only a hung legacy handler shows a transient
-  `Loading...` item until the next open.
+- A brand-new file type whose snapshot was never cached shows a transient
+  `Loading...` item on its first open (no blocked menu thread); the background
+  worker builds the menu and the next right-click is instant (warm worker +
+  file-type cache). Because results are cached per file type, per-file items
+  such as OneDrive or Git status may show briefly stale values; expired entries
+  (default 10 minutes, `LEGACYBRIDGE_CACHE_TTL_MS` to change) refresh in the
+  background on open.
 
 ## Notes
 

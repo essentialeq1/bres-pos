@@ -3,9 +3,11 @@
 #include "Log.h"
 #include "Module.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cwchar>
+#include <cwctype>
 #include <cstdlib>
 #include <jobapi2.h>
 #include <map>
@@ -202,6 +204,7 @@ struct WorkerClient {
 
 WorkerClient g_worker;
 std::mutex g_workerMutex;
+std::atomic<bool> g_persistentBusy{false};
 
 // Fallback: one short-lived process that handles exactly one request.
 bool TransactOneShot(const std::string& req, std::string& resp, DWORD timeoutMs) {
@@ -219,16 +222,30 @@ bool TransactOneShot(const std::string& req, std::string& resp, DWORD timeoutMs)
     return ok;
 }
 
-// Persistent worker first, one-shot fallback. Serialized so only one request
-// is in flight at a time (the shell can call us from several threads).
+bool TransactPersistent(const std::string& req, std::string& resp, DWORD timeoutMs) {
+    if (!g_worker.EnsureStarted()) return false;
+    ScopedTimer timer(L"worker: transact");
+    if (WriteFrame(g_worker.hStdin, req) && ReadFrame(g_worker.hStdout, resp, timeoutMs))
+        return true;
+    Log(L"persistent worker transaction failed; restarting worker");
+    g_worker.Stop(true);
+    return false;
+}
+
+// Persistent (warm) worker for the common case; concurrent requests get their
+// own one-shot worker so a slow legacy handler can't queue behind the user's
+// next click. "Skip stale" is handled by the per-key PendingBuild guard, which
+// never builds the same key twice at once.
 bool Transact(const std::string& req, std::string& resp, DWORD timeoutMs) {
-    std::lock_guard<std::mutex> lock(g_workerMutex);
-    if (g_worker.EnsureStarted()) {
-        ScopedTimer timer(L"worker: transact");
-        if (WriteFrame(g_worker.hStdin, req) && ReadFrame(g_worker.hStdout, resp, timeoutMs))
-            return true;
-        Log(L"persistent worker transaction failed; falling back to one-shot");
-        g_worker.Stop(true);
+    bool expected = false;
+    if (g_persistentBusy.compare_exchange_strong(expected, true)) {
+        bool ok = false;
+        {
+            std::lock_guard<std::mutex> lock(g_workerMutex);
+            ok = TransactPersistent(req, resp, timeoutMs);
+        }
+        g_persistentBusy.store(false);
+        if (ok) return true;
     }
     return TransactOneShot(req, resp, timeoutMs);
 }
@@ -330,15 +347,58 @@ bool ParseEnumResponse(const std::string& bytes, std::vector<LegacyMenuItem>& ou
 // ---- caching + public entry points ----------------------------------------
 
 std::mutex g_cacheMutex;
-std::mutex g_buildMutex;
-std::map<std::wstring, std::vector<LegacyMenuItem>> g_cache;
+
+struct CacheEntry {
+    std::vector<LegacyMenuItem> tree;
+    ULONGLONG builtAt = 0;   // GetTickCount64() when this entry was published
+};
+
+std::map<std::wstring, CacheEntry> g_cache;
 constexpr size_t kMaxCache = 24;
 
+// Default 10 minutes; override with LEGACYBRIDGE_CACHE_TTL_MS (>= 1000 ms).
+ULONGLONG CacheTtlMs() {
+    static ULONGLONG ttls = 0;
+    if (ttls == 0) {
+        ttls = 10ull * 60ull * 1000ull;
+        wchar_t v[32] = { 0 };
+        const DWORD n = GetEnvironmentVariableW(L"LEGACYBRIDGE_CACHE_TTL_MS", v, _countof(v));
+        if (n > 0) {
+            const ULONGLONG x = _wcstoui64(v, nullptr, 10);
+            if (x >= 1000) ttls = x;
+        }
+    }
+    return ttls;
+}
+
+// Caches by FILE TYPE (extension) so one .pdf warms every .pdf; non-files get a
+// folder/drive/background key. Multi-selection is exact-path because the merged
+// handler's result depends on the whole set. Per-file handlers (OneDrive, Git
+// status) may therefore show briefly stale entries; stale-while-revalidate below
+// refreshes them in the background on hit.
+std::wstring FileTypeKey(const std::wstring& path) {
+    const DWORD attrs = GetFileAttributesW(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (path.size() == 3 && path[1] == L':' && path[2] == L'\\') return L"drive";
+        return L"folder";
+    }
+    if (path.empty()) return L"background";
+    const size_t dot = path.find_last_of(L'.');
+    const size_t slash = path.find_last_of(L"\\/");
+    if (dot != std::wstring::npos && (slash == std::wstring::npos || dot > slash)) {
+        std::wstring ext = path.substr(dot);
+        for (auto& c : ext) c = static_cast<wchar_t>(towlower(static_cast<wint_t>(c)));
+        return ext;
+    }
+    return L"noext";
+}
+
 std::wstring CacheKey(const std::vector<std::wstring>& paths) {
-    std::wstring key;
+    if (paths.size() == 1) return FileTypeKey(paths[0]);
+    std::wstring key = L"multi";
     for (const auto& p : paths) {
-        key += p;
         key.push_back(kFieldSep);
+        key += p;
     }
     return key;
 }
@@ -374,15 +434,11 @@ bool RunEnumeration(const std::vector<std::wstring>& paths, bool hideShell,
 // QueryContextMenu + icon resolution) can take well over a second. Doing that
 // inside EnumSubCommands would block the shell's menu thread and hold up every
 // other modern extension, so it runs on a detached background thread here and
-// callers only ever block briefly (or not at all) until the result is cached.
+// callers never block on it (they serve from cache, or show "Loading...").
 
 struct PendingBuild {
     std::mutex m;
-    std::condition_variable cv;
     bool started = false;
-    bool done = false;
-    bool ok = false;
-    std::vector<LegacyMenuItem> tree;
 };
 
 std::mutex g_pendingMutex;
@@ -394,32 +450,18 @@ void RunAsyncBuild(const std::vector<std::wstring>& paths, const std::wstring& k
     std::vector<LegacyMenuItem> tree;
     const bool ok = RunEnumeration(paths, HideShellDefault(), tree);
 
-    {
-        std::lock_guard<std::mutex> lk(pb->m);
-        pb->tree = std::move(tree);
-        pb->ok = ok;
-        pb->done = true;
-    }
-    pb->cv.notify_all();
-
-    // Publish a successful result to the shared cache so the next open is a
-    // pure cache hit (no worker round-trip). Copy the tree out under the build
-    // lock so no reader can observe it mid-publish.
-    std::vector<LegacyMenuItem> published;
-    {
-        std::lock_guard<std::mutex> lk(pb->m);
-        if (ok && !pb->tree.empty()) published = pb->tree;
-    }
-    if (!published.empty()) {
+    if (ok && !tree.empty()) {
+        CacheEntry entry;
+        entry.tree = std::move(tree);
+        entry.builtAt = GetTickCount64();
         std::lock_guard<std::mutex> lk(g_cacheMutex);
-        if (g_cache.size() >= kMaxCache) g_cache.erase(g_cache.begin());
-        g_cache[key] = std::move(published);
+        if (g_cache.size() >= kMaxCache && g_cache.find(key) == g_cache.end())
+            g_cache.erase(g_cache.begin());
+        g_cache[key] = std::move(entry);
     }
 
-    {
-        std::lock_guard<std::mutex> lk(g_pendingMutex);
-        g_pending.erase(key);
-    }
+    std::lock_guard<std::mutex> lk(g_pendingMutex);
+    g_pending.erase(key);
 }
 
 std::shared_ptr<PendingBuild> PendingFor(const std::wstring& key) {
@@ -443,6 +485,18 @@ void EnsureBuild(const std::vector<std::wstring>& paths, const std::wstring& key
     std::thread([paths, key, pb]() { RunAsyncBuild(paths, key, pb); }).detach();
 }
 
+void StartSnapshotWorkerPrewarm() {
+    static std::atomic<bool> prewarmed{false};
+    if (prewarmed.exchange(true)) return;
+    // Spawn the warm worker process off-thread so the first right-click doesn't
+    // pay the CreateProcess + handler-DLL load cost. DllMain can't do this
+    // (loader lock), so it is triggered from the first class-factory call.
+    std::thread([]() {
+        std::lock_guard<std::mutex> lock(g_workerMutex);
+        g_worker.EnsureStarted();
+    }).detach();
+}
+
 } // namespace
 
 void StartSnapshotWarmup(const std::vector<std::wstring>& paths) {
@@ -451,105 +505,56 @@ void StartSnapshotWarmup(const std::vector<std::wstring>& paths) {
     const std::wstring key = CacheKey(paths);
     {
         std::lock_guard<std::mutex> lk(g_cacheMutex);
-        if (g_cache.find(key) != g_cache.end()) return;
+        auto it = g_cache.find(key);
+        if (it != g_cache.end() &&
+            (GetTickCount64() - it->second.builtAt) <= CacheTtlMs())
+            return;   // fresh; nothing to do
     }
 
     const auto pb = PendingFor(key);
     EnsureBuild(paths, key, pb);
 }
 
-bool TryGetSnapshot(const std::vector<std::wstring>& paths, DWORD waitMs,
+bool TryGetSnapshot(const std::vector<std::wstring>& paths,
                     std::vector<LegacyMenuItem>& out) {
     out.clear();
     if (paths.empty()) return true;
 
     const std::wstring key = CacheKey(paths);
+    bool hit = false;
+    bool expired = false;
     {
         std::lock_guard<std::mutex> lk(g_cacheMutex);
         auto it = g_cache.find(key);
         if (it != g_cache.end()) {
-            TimingLog(L"cache hit: %s", paths[0].c_str());
-            out = it->second;
-            return true;
+            hit = true;
+            out = it->second.tree;
+            expired = (GetTickCount64() - it->second.builtAt) > CacheTtlMs();
         }
     }
-    TimingLog(L"cache miss: %s", paths[0].c_str());
 
+    if (hit) {
+        TimingLog(expired ? L"cache hit (stale, revalidating): %s" : L"cache hit: %s",
+                  paths[0].c_str());
+        if (expired) {
+            const auto pb = PendingFor(key);
+            EnsureBuild(paths, key, pb);   // stale-while-revalidate
+        }
+        return true;
+    }
+
+    TimingLog(L"cache miss: %s", paths[0].c_str());
     const auto pb = PendingFor(key);
     EnsureBuild(paths, key, pb);
-
-    std::unique_lock<std::mutex> lk(pb->m);
-    if (pb->done) {
-        out = pb->tree;
-        return true;
-    }
-    pb->cv.wait_for(lk, std::chrono::milliseconds(waitMs));
-    if (pb->done) {
-        out = pb->tree;
-        return true;
-    }
-    return false;
+    return false;   // cold: return immediately, never block the menu thread
 }
 
 bool IsSnapshotReady(const std::vector<std::wstring>& paths) {
     if (paths.empty()) return true;
 
     const std::wstring key = CacheKey(paths);
-    {
-        std::lock_guard<std::mutex> lk(g_cacheMutex);
-        if (g_cache.find(key) != g_cache.end()) return true;
-    }
-
-    std::shared_ptr<PendingBuild> pb;
-    {
-        std::lock_guard<std::mutex> lk(g_pendingMutex);
-        auto it = g_pending.find(key);
-        if (it != g_pending.end()) pb = it->second;
-    }
-    if (pb) {
-        std::lock_guard<std::mutex> lk(pb->m);
-        return pb->done;
-    }
-    return false;
-}
-
-std::vector<LegacyMenuItem> GetSnapshot(const std::vector<std::wstring>& paths) {
-    std::vector<LegacyMenuItem> none;
-    if (paths.empty()) return none;
-
-    const std::wstring key = CacheKey(paths);
-    {
-        std::lock_guard<std::mutex> lk(g_cacheMutex);
-        auto it = g_cache.find(key);
-        if (it != g_cache.end()) {
-            TimingLog(L"cache hit: %s", paths[0].c_str());
-            return it->second;
-        }
-    }
-    TimingLog(L"cache miss: %s", paths[0].c_str());
-
-    // Serialize builds and re-check so concurrent calls for the same
-    // selection never spawn duplicate work.
-    std::lock_guard<std::mutex> build(g_buildMutex);
-    {
-        std::lock_guard<std::mutex> lk(g_cacheMutex);
-        auto it = g_cache.find(key);
-        if (it != g_cache.end()) return it->second;
-    }
-
-    std::vector<LegacyMenuItem> tree;
-    if (!RunEnumeration(paths, HideShellDefault(), tree)) {
-        Log(L"GetSnapshot: enumeration failed for %s", paths[0].c_str());
-        return none;
-    }
-
-    {
-        std::lock_guard<std::mutex> lk(g_cacheMutex);
-        if (g_cache.size() >= kMaxCache) g_cache.erase(g_cache.begin());
-        g_cache[key] = tree;
-    }
-    Log(L"GetSnapshot: built %zu top-level node(s) for %s", tree.size(), paths[0].c_str());
-    return tree;
+    std::lock_guard<std::mutex> lk(g_cacheMutex);
+    return g_cache.find(key) != g_cache.end();
 }
 
 HRESULT InvokeLegacyItem(const std::vector<std::wstring>& paths, UINT offset,
