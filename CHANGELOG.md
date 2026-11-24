@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.21
 
 ### Phase 0 — Diagnostics
 - Opt-in timing logs (`LEGACYBRIDGE_TIMING=1`): DLL load, request received,
