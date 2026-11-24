@@ -29,6 +29,9 @@ crashing third-party handler can never take Explorer down.
 
 Logs: `%TEMP%\LegacyMenuBridgeNative-*.log`
 
+See [`CHANGELOG.md`](CHANGELOG.md) for release notes and
+[`native/VERIFICATION.md`](native/VERIFICATION.md) for the test matrix.
+
 ## Archived prototype
 
 `legacy-csharp/` contains the earlier C# prototype that **scanned the registry

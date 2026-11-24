@@ -6,6 +6,7 @@
 #include <ShlObj.h>
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 #include <stdint.h>
 #include <vector>
 
@@ -46,7 +47,18 @@ bool HBitmapTo32bpp(HBITMAP hbmp, LONG& w, LONG& h, std::vector<unsigned char>& 
     const int got = GetDIBits(dc, hbmp, 0, (UINT)h, bgra.data(),
                               reinterpret_cast<BITMAPINFO*>(&bih), DIB_RGB_COLORS);
     ReleaseDC(nullptr, dc);
-    return got == (int)h;
+    if (got != (int)h) return false;
+
+    // GDI fills the alpha byte with 0 for sources that carry no alpha channel
+    // (e.g. a 24bpp DDB). If every pixel is alpha 0, assume the icon is opaque.
+    bool anyAlpha = false;
+    for (size_t i = 3; i < bgra.size(); i += 4) {
+        if (bgra[i] != 0) { anyAlpha = true; break; }
+    }
+    if (!anyAlpha) {
+        for (size_t i = 3; i < bgra.size(); i += 4) bgra[i] = 255;
+    }
+    return true;
 }
 
 // Bilinear resample of a top-down 32bpp BGRA buffer to (tw,th), blending on

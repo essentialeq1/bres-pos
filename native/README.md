@@ -156,3 +156,6 @@ Explorer) to show all duplicates again.
   `%LOCALAPPDATA%\bres-pos\icons` (named by a hash of file type + verb + title,
   so unchanged icons are reused and never rewritten). To clear the cache and
   force fresh icons, delete that folder — Explorer rebuilds it on demand.
+- See [CHANGELOG.md](../CHANGELOG.md) for the change history and
+  [VERIFICATION.md](VERIFICATION.md) for the manual test matrix (to be run on
+  Windows).
