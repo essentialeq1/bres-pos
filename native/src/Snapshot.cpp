@@ -444,8 +444,7 @@ struct PendingBuild {
 std::mutex g_pendingMutex;
 std::map<std::wstring, std::shared_ptr<PendingBuild>> g_pending;
 
-void RunAsyncBuild(const std::vector<std::wstring>& paths, const std::wstring& key,
-                   const std::shared_ptr<PendingBuild>& pb) {
+void RunAsyncBuild(const std::vector<std::wstring>& paths, const std::wstring& key) {
     ScopedTimer timer(L"worker: async build");
     std::vector<LegacyMenuItem> tree;
     const bool ok = RunEnumeration(paths, HideShellDefault(), tree);
@@ -482,8 +481,10 @@ void EnsureBuild(const std::vector<std::wstring>& paths, const std::wstring& key
     }
     // Detached: the surrogate never unloads the DLL (DllCanUnloadNow returns
     // S_FALSE) and process teardown is the only reason these threads end.
-    std::thread([paths, key, pb]() { RunAsyncBuild(paths, key, pb); }).detach();
+    std::thread([paths, key]() { RunAsyncBuild(paths, key); }).detach();
 }
+
+} // namespace
 
 void StartSnapshotWorkerPrewarm() {
     static std::atomic<bool> prewarmed{false};
@@ -496,8 +497,6 @@ void StartSnapshotWorkerPrewarm() {
         g_worker.EnsureStarted();
     }).detach();
 }
-
-} // namespace
 
 void StartSnapshotWarmup(const std::vector<std::wstring>& paths) {
     if (paths.empty()) return;
